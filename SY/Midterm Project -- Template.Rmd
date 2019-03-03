@@ -65,7 +65,7 @@ sample_data <- function(sample_size){
 
 iteration_func <- function(model, train_data, test_data = test.data) {
   result <- laply(train_data, model)
-  Data <- paste("dat_", c(rep(n.values[1], 3), rep(n.values[2], 3), rep(n.values[2], 3)), "_", rep(c(1, 2, 3), 3), sep = "")
+  Data <- paste("dat_", c(rep(n.values[1], 3), rep(n.values[2], 3), rep(n.values[3], 3)), "_", rep(c(1, 2, 3), 3), sep = "")
   result <- cbind(result[, 4], cbind(Data, result[,1:3]))
   colnames(result) <- c("Model", "Data", "A", "B", "C")
   return(result)
