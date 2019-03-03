@@ -16,30 +16,64 @@ knitr::opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE,
 ```{r libraries, echo = FALSE}
 library(data.table)
 library(DT)
+library(rpart)
 ```
 
 ```{r source_files}
-
-```
-
-```{r functions}
-
 ```
 
 ```{r constants}
 n.values <- c(500, 1000, 2000)
 iterations <- 3
+# Data is 28 pixels big in width and height
+img_rows <- img_cols <- 7
 ```
 
-```{r load_data}
 
+```{r load_data}
+train.data <- read.csv("../Data/MNIST-fashion training set-49.csv")
+test.data <- read.csv("../Data/MNIST-fashion testing set-49.csv")
 ```
 
 ```{r clean_data}
+#' Data is transformed to matrix (because they are easier indexable) and  pixels
+#' are separated from labels.
+x_train <- as.matrix(train.data[, 2:dim(train.data)[2]])
+y_train <- as.matrix(train.data[, 1])
 
+# The same for test set.
+x_test <- as.matrix(test.data[, 2:dim(train.data)[2]])
+y_test <- as.matrix(test.data[, 1])
+
+clothes.labels <-c( "T-shirt/top", "Trouser", "Pullover", "Dress", "Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot")
+```
+
+```{r functions}
+# Function to rotate matrices
+rotate <- function(x) t(apply(x, 2, rev))
+# Function to plot image from a matrix x
+plot_image <- function(x, title = "", title.color = "black") {
+  dim(x) <- c(img_rows, img_cols)
+  image(rotate(rotate(x)), axes = FALSE,
+        col = grey(seq(0, 1, length = 256)),
+        main = list(title, col = title.color))
+}
+sample_data <- function(sample_size){
+  dat <- c()
+  for(i in c(1:10)){
+    dat <- c(dat,sample(c(1:6000 + 6000 * (i - 1)), size = sample_size/10))
+  }
+  return(list("x" = x_train[dat, ], "y" = y_train[dat, ]))
+}
 ```
 
 ```{r generate_samples}
+dat_500_1 <- sample_data(500);
+dat_1000 <- sample_data(1000)
+dat_2000 <- sample_data(2000)
+```
+
+```{r playground}
 
 ```
 
@@ -50,7 +84,23 @@ iterations <- 3
 
 
 ```{r code_model1_development, eval = TRUE}
+library(FNN)
 
+model_kNN <- function(train_data, xtest = x_test, ytest = y_test, k){
+  t1 <- Sys.time()
+  test_pred_knn <- knn(train = train_data$x,
+                       test = xtest,
+                       cl = train_data$y,
+                       k = k)
+  t2 <- Sys.time()
+  A <- nrow(x_train) / 60000
+  B <- min((as.numeric(t2 - t1)) / 60)
+  C <- mean(test_pred_knn != ytest)
+  return(list(A = A, B = B, C = C))
+}
+
+
+model_kNN(train_data = dat_500_1, k = 5)
 ```
 
 ```{r load_model1}
