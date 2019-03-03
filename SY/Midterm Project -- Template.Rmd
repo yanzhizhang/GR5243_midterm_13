@@ -17,6 +17,8 @@ knitr::opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE,
 library(data.table)
 library(DT)
 library(rpart)
+library(plyr)
+library(FNN)
 ```
 
 ```{r source_files}
@@ -45,19 +47,12 @@ y_train <- as.matrix(train.data[, 1])
 x_test <- as.matrix(test.data[, 2:dim(train.data)[2]])
 y_test <- as.matrix(test.data[, 1])
 
+test.data <- list(x = x_test, y = y_test)
+
 clothes.labels <-c( "T-shirt/top", "Trouser", "Pullover", "Dress", "Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot")
 ```
 
 ```{r functions}
-# Function to rotate matrices
-rotate <- function(x) t(apply(x, 2, rev))
-# Function to plot image from a matrix x
-plot_image <- function(x, title = "", title.color = "black") {
-  dim(x) <- c(img_rows, img_cols)
-  image(rotate(rotate(x)), axes = FALSE,
-        col = grey(seq(0, 1, length = 256)),
-        main = list(title, col = title.color))
-}
 sample_data <- function(sample_size){
   dat <- c()
   for(i in c(1:10)){
@@ -68,9 +63,17 @@ sample_data <- function(sample_size){
 ```
 
 ```{r generate_samples}
-dat_500_1 <- sample_data(500);
-dat_1000 <- sample_data(1000)
-dat_2000 <- sample_data(2000)
+train_data_sample <- list(
+  dat_500_1 = sample_data(500),
+  dat_500_2 = sample_data(500),
+  dat_500_3 = sample_data(500),
+  dat_1000_1 = sample_data(1000),
+  dat_1000_2 = sample_data(1000),
+  dat_1000_3 = sample_data(1000),
+  dat_2000_1 = sample_data(2000),
+  dat_2000_2 = sample_data(2000),
+  dat_2000_3 = sample_data(2000)
+)
 ```
 
 ```{r playground}
@@ -86,25 +89,23 @@ dat_2000 <- sample_data(2000)
 ```{r code_model1_development, eval = TRUE}
 library(FNN)
 
-model_kNN <- function(train_data, xtest = x_test, ytest = y_test, k){
+model_kNN <- function(train_data, test_data = test.data){
   t1 <- Sys.time()
   test_pred_knn <- knn(train = train_data$x,
-                       test = xtest,
+                       test = test_data$x,
                        cl = train_data$y,
-                       k = k)
+                       k = 5)
   t2 <- Sys.time()
-  A <- nrow(x_train) / 60000
-  B <- min((as.numeric(t2 - t1)) / 60)
-  C <- mean(test_pred_knn != ytest)
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(test_pred_knn != test_data$y), 4)
+  
   return(list(A = A, B = B, C = C))
 }
-
-
-model_kNN(train_data = dat_500_1, k = 5)
 ```
 
 ```{r load_model1}
-
+laply(train_data_sample, model_kNN)
 ```
 
 ### Model 2:  
