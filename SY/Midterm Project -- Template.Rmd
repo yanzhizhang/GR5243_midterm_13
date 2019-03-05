@@ -226,22 +226,43 @@ record <- rbind(record, iteration_func(model = model_lda, train_data = train_dat
 
 
 ```{r code_model6_development, eval = TRUE}
-
+model_ridge <- function(train_data, test_data = test.data){
+  t1 <- Sys.time()
+  ridge <- glmnet(x = train_data$x, as.factor(train_data$y), alpha = 0, family = "multinomial")
+  predridge <- predict(object = ridge, newx = test_data$x,type = "class")
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(predridge[, dim(predridge)[2]] != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "ridge"))
+}
 ```
 
 ```{r load_model6}
-
+record <- rbind(record, iteration_func(model = model_ridge, train_data = train_data_sample))
 ```
 
 ### Model 7
 
 
 ```{r code_model7_development, eval = TRUE}
-
+model_lasso <- function(train_data, test_data = test.data){
+  t1 <- Sys.time()
+  lasso <- glmnet(x = train_data$x, as.factor(train_data$y), alpha = 1, family = "multinomial")
+  predlasso <- predict(object = lasso, newx = test_data$x, type="class")
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(predlasso[, dim(predlasso)[2]] != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "lasso"))
+}
 ```
 
 ```{r load_model7}
-
+record <- rbind(record, iteration_func(model = model_lasso, train_data = train_data_sample))
+iteration_func(model = model_lasso, train_data = train_data_sample)
 ```
 
 ### Model 8
