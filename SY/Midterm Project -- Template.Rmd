@@ -21,7 +21,7 @@ library(plyr)
 library(FNN)
 library(randomForest)
 library(e1071)
-library(xgboost)
+library(glmnet)
 ```
 
 ```{r source_files}
@@ -262,7 +262,6 @@ model_lasso <- function(train_data, test_data = test.data){
 
 ```{r load_model7}
 record <- rbind(record, iteration_func(model = model_lasso, train_data = train_data_sample))
-iteration_func(model = model_lasso, train_data = train_data_sample)
 ```
 
 ### Model 8
