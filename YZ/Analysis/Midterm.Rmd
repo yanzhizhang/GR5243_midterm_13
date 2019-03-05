@@ -42,13 +42,15 @@ test.data <- read.csv("../Data/MNIST-fashion testing set-49.csv")
 #' are separated from labels.
 x_train <- as.matrix(train.data[, 2:dim(train.data)[2]])
 y_train <- as.matrix(train.data[, 1])
+
 # Unflattening the data.
-dim(x_train) <- c(nrow(x_train), img_rows, img_cols, 1) 
+# dim(x_train) <- c(nrow(x_train), img_rows, img_cols, 1) 
 
 # The same for test set.
 x_test <- as.matrix(test.data[, 2:dim(train.data)[2]])
 y_test <- as.matrix(test.data[, 1])
-dim(x_test) <- c(nrow(x_test), img_rows, img_cols, 1) 
+# Unflattening the data.
+# dim(x_test) <- c(nrow(x_test), img_rows, img_cols, 1) 
 
 clothes.labels <-c( "T-shirt/top", "Trouser", "Pullover", "Dress", "Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot")
 ```
@@ -68,15 +70,7 @@ plot_image <- function(x, title = "", title.color = "black") {
 sample_data <- function(sample_size){
   dat <- c()
   for(i in c(1:10)){
-    if (sample_size == 500) {
-      dat <- c(dat,sample(c(1*i:6000*i), size = sample_size/10))
-    }
-    if (sample_size == 1000) {
-      dat <- c(dat,sample(c(1*i:6000*i), size = sample_size/10))
-    }
-    if (sample_size == 2000) {
-      dat <- c(dat,sample(c(1*i:6000*i), size = sample_size/10))
-    }
+    dat <- c(dat,sample(c(1:6000)+(i-1)*6000, size = sample_size/10))
   }
   return(list("x" = x_train[dat], "y" = y_train[dat]))
 }
@@ -93,7 +87,7 @@ dat_2000 <- sample_data(2000)
 par(mfrow=c(4, 4), mar=c(0, 0.2, 1, 0.2))
 for (i in 1:16) {
   nr <- i * 10
-  plot_image(x_train[nr, , , 1],
+  plot_image(x_train[nr,],
              clothes.labels[as.numeric(train.data[nr, 1] + 1)])
 }
 ```

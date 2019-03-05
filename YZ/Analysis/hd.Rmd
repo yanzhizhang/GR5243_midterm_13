@@ -1,0 +1,331 @@
+---
+title: "Applied Data Science:  Midterm Project"
+author: "Group"
+date: ""
+output:
+  prettydoc::html_pretty:
+  theme: cayman
+highlight: github
+---
+
+```{r setup, include=FALSE}
+set.seed(72)
+knitr::opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55))
+```
+
+```{r libraries, echo = FALSE}
+library(data.table)
+library(DT)
+library(knitr) # for knitting document
+library(data.table) # increase speed of dataframe reading
+library(dplyr)
+library(nnet)
+library(class)
+library(rpart)
+library(randomForest)
+library(glmnet)
+library(e1071)
+library(xgboost)
+library(MASS)
+library(klaR)
+library(caret)
+```
+
+```{r source_files}
+
+```
+
+```{r functions}
+get_image <- function(x) {image(
+         matrix(unlist(train[x,-1]),ncol = 7,byrow = T),
+         col=cm.colors(255),    # Select 255 grey levels
+         axes = FALSE
+       )
+}
+
+
+
+create.formula <- function(outcome.name, input.names, input.patterns = NA,all.data.names = NA, return.as = "character") {
+
+  variable.names.from.patterns <- c()
+  if (!is.na(input.patterns[1]) & !is.na(all.data.names[1])) {
+    pattern <- paste(input.patterns, collapse = "|")
+    variable.names.from.patterns <- all.data.names[grep(pattern = pattern,
+    x = all.data.names)]  
+  }
+  
+  all.input.names <- unique(c(input.names, variable.names.from.patterns))
+  all.input.names <- all.input.names[all.input.names !=outcome.name]
+
+  if (!is.na(all.data.names[1])) {
+    all.input.names <- all.input.names[all.input.names %in%
+    all.data.names]
+   }
+
+  input.names.delineated <- sprintf("`%s`", all.input.names)
+  the.formula <- sprintf("`%s` ~ %s", outcome.name, paste(input.names.delineated,collapse = " + "))
+  
+  if (return.as == "formula") {
+     return(as.formula(the.formula))
+  }
+  
+  if (return.as != "formula") {
+     return(the.formula)
+  }
+}
+
+
+create.x.and.y <- function(the.formula, data) {
+   require(data.table)
+   setDT(data)
+   x <- model.matrix(object = as.formula(the.formula),data = data)
+   y.name <- trimws(x = gsub(pattern = "`", replacement = "",
+   x = strsplit(x = the.formula, split = "~")[[1]][1],fixed = TRUE))
+   y <- data[as.numeric(rownames(x)), get(y.name)]
+  return(list(x = x, y = y))
+}
+
+
+score <- function(data,function_name)
+{
+  FUN <- match.fun(function_name) 
+  
+  start_time <- as.numeric(Sys.time())
+  mod <- FUN(data)
+  end_time <- as.numeric(Sys.time())
+  
+  size = nrow(data)
+  
+  A = size/nrow(train)
+  
+  B = min(1,(end_time - start_time)/60)
+
+  C = mod$'C'
+  
+  return(data.table('Sample size'=size,Data=deparse(substitute(data)),A=A,B=B,C=C,score=0.25 * A + 0.25 * B + 0.5 * C))
+}
+```
+
+```{r constants}
+n.values <- c(500, 1000, 2000)
+iterations <- 3
+```
+
+```{r load_data}
+train <- fread("../Data/MNIST-fashion training set-49.csv")
+test <- fread("../Data/MNIST-fashion testing set-49.csv")
+
+par(mfrow=c(3,3), mar = rep(0, 4)) 
+lapply(1:9, get_image)#visulization of first 9 images
+```
+
+```{r clean_data}
+# normalize the values of each pixel
+train[,2:50] <-  train[,2:50]/255
+test[,2:50] <- test[,2:50]/255
+
+
+train$label <- as.factor(train$label) #change characters to factors
+test$label <- as.factor(test$label)
+
+
+input.names <- names(test)[-1]
+output.name <- names(test)[1]
+formula <- create.formula(outcome.name = output.name, input.names = input.names)
+```
+
+```{r generate_samples}
+#Create 9 different size data sets
+for (i in 1:iterations)
+{
+  for (j in n.values)
+  {
+    nam <- paste("dat", j,i, sep = "_")
+    assign(nam, sample_n(train, j))
+
+  }
+}
+```
+
+## Introduction
+
+
+### Model 1 Multinomial logistic regression:  
+
+
+```{r code_model1_development, eval = TRUE}
+Multinomial_logistic_regression <- function(data){
+  mod <- multinom(formula,data = data, trace=FALSE)
+  pred <- predict(object = mod, newdata = test[,2:50])
+  C = 1-sum(test$label==pred)/nrow(test)
+  return(list('Model'=mod,'Prediction'=pred,'C'=C))
+}
+```
+
+```{r load_model1}
+score(dat_500_1,Multinomial_logistic_regression)
+```
+
+### Model 2 K(5)-Nearest Neighbors :  
+
+
+```{r code_model2_development, eval = TRUE}
+K_Nearest_Neighbors <- function(data,k=5)
+{
+  pred <- knn(data[,2:50],test = test[,2:50],,cl=data$label,k=k)
+  C = 1-sum(test$label==pred)/nrow(test)
+   return(list('Model'=NA,'Prediction'=pred,'C'=C))
+}
+```
+
+```{r load_model2}
+score(dat_500_1,K_Nearest_Neighbors)
+```
+
+### Model 3 Classification Tree:  
+
+
+```{r code_model3_development, eval = TRUE}
+
+testlabel <- rpart(formula,data = test,method = "class")
+
+
+Classification_Tree <- function(data)
+{
+  mod <- rpart(formula,data = data,method = "class")
+  pred=predict(object = mod, newdata = test[,2:50],type = "vector")
+  C = 1-sum(testlabel$y==pred)/nrow(test)
+  return(list('Model'=mod,'Prediction'=pred,'C'=C))
+}
+```
+
+```{r load_model3}
+score(dat_1000_1, Classification_Tree)
+```
+
+### Model 4 Random Forest:
+
+
+```{r code_model4_development, eval = TRUE}
+Random_Forest <- function(data)
+{
+  mod <- randomForest(formula =data$label~.,data=data)
+  pred <- predict(object = mod, newdata = test[,2:50])
+  C = 1-sum(test$label==pred)/nrow(test)
+  return(list('Model'=mod,'Prediction'=pred,'C'=C))
+
+}
+```
+
+```{r load_model4}
+score(dat_500_1, Random_Forest)
+```
+
+### Model 5 svm:
+
+
+```{r code_model5_development, eval = TRUE}
+Support_Vector_Machines <- function(data)
+{
+  mod <- svm(data[,2:50],data$label)
+  pred <- predict(mod,test[,2:50])
+  C = 1-sum(test$label==pred)/nrow(test)
+  return(list('Model'=mod,'Prediction'=pred,'C'=C))
+}
+```
+
+```{r load_model5}
+score(dat_500_1, Support_Vector_Machines)
+```
+
+### Model 6 Linear Discriminant Analysis:
+
+
+```{r code_model6_development, eval = TRUE}
+Linear_Discriminant_Analysis <- function(data)
+{
+  mod <- lda(label~., data=data)
+  predictions <- predict(mod, test[,2:50])
+  pred <- predictions$class
+  C = 1-sum(test$label==pred)/nrow(test)
+  return(list('Model'=mod,'Prediction'=pred,'C'=C))
+}
+```
+
+```{r load_model6}
+score(dat_500_1, Linear_Discriminant_Analysis)
+```
+
+### Model 7 Partial Least Squares Discriminant Analysis:
+
+
+```{r code_model7_development, eval = TRUE}
+Partial_Least_Squares <- function(data)
+{
+  mod <- plsda(data[,2:50], data$label, probMethod="Bayes")
+  pred <- predict(mod, test[,2:50])
+  C = 1-sum(test$label==pred)/nrow(test)
+  return(list('Model'=mod,'Prediction'=pred,'C'=C))
+}
+```
+
+```{r load_model7}
+score(dat_500_1, Partial_Least_Squares)
+```
+
+### Model 8 naiveBayes:
+
+
+```{r code_model8_development, eval = TRUE}
+nb <- function(data)
+{
+  mod <- naiveBayes(label~., data=data)
+  pred <- predict(mod, test[,2:50])
+  C = 1-sum(test$label==pred)/nrow(test)
+  return(list('Model'=mod,'Prediction'=pred,'C'=C))
+}
+```
+
+```{r load_model8}
+score(dat_500_1,nb)
+```
+
+### Model 9 Neural Networks:
+
+
+```{r code_model9_development, eval = TRUE}
+nn <- function(data)
+{
+  mod <- nnet(label ~ ., data = data, size = 2, rang = 0.1,decay = 5e-4, maxit = 200, trace =F)
+  pred <- predict(mod, test[,-1], type = "class")
+  C = 1-sum(test$label==pred)/nrow(test)
+  return(list('Model'=mod,'Prediction'=pred,'C'=C))
+}
+```
+
+```{r load_model9}
+score(dat_500_1,nn)
+```
+
+### Model 10
+
+
+```{r code_model10_development, eval = TRUE}
+
+```
+
+```{r load_model10}
+
+```
+
+## Scoreboard
+
+```{r scoreboard}
+
+```
+
+## Discussion
+
+
+## References
+
