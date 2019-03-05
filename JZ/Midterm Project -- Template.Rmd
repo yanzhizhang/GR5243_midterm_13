@@ -71,7 +71,17 @@ iteration_func(model = model_glm, train_data = train_data_sample)
 
 
 ```{r code_model2_development, eval = TRUE}
-
+model_ridge <- function(train_data, test_data = test.data){
+  t1 <- Sys.time()
+  ridge <- glmnet(x = train_data$x, as.factor(train_data$y), alpha = 0, family = "multinomial")
+  predridge <- predict(object = ridge, newx=test_data$x,type="class")
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(predridge[,dim(predridge)[2]] != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "ridge"))
+}
 ```
 
 ```{r load_model2}
