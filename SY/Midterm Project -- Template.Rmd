@@ -22,6 +22,7 @@ library(FNN)
 library(randomForest)
 library(e1071)
 library(glmnet)
+library(MASS)
 ```
 
 ```{r source_files}
@@ -33,6 +34,7 @@ iterations <- 3
 # Data is 28 pixels big in width and height
 img_rows <- img_cols <- 7
 sample_size <- c(rep(n.values[1], 3), rep(n.values[2], 3), rep(n.values[3], 3))
+test_size = 10000
 ```
 
 
@@ -53,7 +55,7 @@ y_test <- as.matrix(test.data[, 1])
 
 test.data <- list(x = x_test, y = y_test)
 
-clothes.labels <-as.vector(unique(y_train))
+clothes.labels <- as.vector(unique(y_train))
 ```
 
 ```{r functions}
@@ -67,14 +69,20 @@ sample_data <- function(sample_size){
 }
 
 iteration_func <- function(model, train_data, test_data = test.data) {
-  result <- laply(train_data, model)
+  #result <- laply(train_data, model)
+  result <- data.frame(A = NULL, B = NULL, C = NULL, name = NULL)
+  prediction <- data.frame(rep(0, test_size))
+  for(i in 1:length(sample_size)) {
+    mod <- model(train_data[[i]], test_data)
+    result<- rbind(result, data.table(mod$A, mod$B, mod$C, mod$model.name))
+    prediction <- cbind(prediction, mod$prediction)
+  }
   Data <- paste("dat_", sample_size, "_", rep(c(1, 2, 3), 3), sep = "")
   Data <- cbind(sample_size, Data)
   result <- cbind(result[, 4], cbind(Data, result[,1:3]))
   colnames(result) <- c("Model", "Sample Size", "Data", "A", "B", "C")
   result <- as.data.table(result)
-  result <- result[, lapply(X = .SD, unlist)]
-  return(result)
+  return(list(score = result, prediction = prediction[, -1]))
 }
 
 # score record of model
@@ -122,12 +130,13 @@ model_5NN <- function(train_data, test_data = test.data){
   B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
   C <- round(mean(test_pred_knn != test_data$y), 4)
   
-  return(list(A = A, B = B, C = C, model.name = "5-NN"))
+  return(list(A = A, B = B, C = C, model.name = "5-NN", prediction = test_pred_knn))
 }
 ```
 
 ```{r load_model1}
-record <- rbind(record, iteration_func(train_data = train_data_sample, model = model_5NN))
+result_5NN <- iteration_func(train_data = train_data_sample, model = model_5NN)
+record <- rbind(record, result_5NN$score)
 ```
 
 ### Model 2:  
@@ -145,12 +154,13 @@ model_randomForest <- function(train_data, test_data = test.data) {
   B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
   C <- round(mean(predRf != test_data$y), 4)
   
-  return(list(A = A, B = B, C = C, model.name = "Random Forest"))
+  return(list(A = A, B = B, C = C, model.name = "Random Forest", prediction = predRf))
 }
 ```
 
 ```{r load_model2}
-record <- rbind(record, iteration_func(model = model_randomForest, train_data = train_data_sample))
+result_Rf <- iteration_func(train_data = train_data_sample, model = model_randomForest)
+record <- rbind(record, result_Rf$score)
 ```
 
 ### Model 3:  
@@ -169,12 +179,13 @@ model_svm <- function(train_data, test_data = test.data){
   B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
   C <- round(mean(predSvm != test_data$y), 4)
   
-  return(list(A = A, B = B, C = C, model.name = "SVM"))
+  return(list(A = A, B = B, C = C, model.name = "SVM", prediction = predSvm))
 }
 ```
 
 ```{r load_model3}
-record <- rbind(record, iteration_func(model = model_svm, train_data = train_data_sample))
+result_SVM <- iteration_func(model = model_svm, train_data = train_data_sample)
+record <- rbind(record, result_SVM$score)
 ```
 
 ### Model 4
@@ -192,12 +203,13 @@ model_glm <- function(train_data, test_data = test.data){
   B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
   C <- round(mean(predglm[, ncol(predglm)] != test_data$y), 4)
   
-  return(list(A = A, B = B, C = C, model.name = "glm"))
+  return(list(A = A, B = B, C = C, model.name = "glm", prediction = predglm[, ncol(predglm)]))
 }
 ```
 
 ```{r load_model4}
-record <- rbind(record, iteration_func(model = model_glm, train_data = train_data_sample))
+result_glm <- iteration_func(model = model_glm, train_data = train_data_sample)
+record <- rbind(record, result_glm$score)
 ```
 
 ### Model 5
@@ -214,12 +226,13 @@ model_lda <- function(train_data, test_data = test.data){
   B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
   C <- round(mean(predlda != test_data$y), 4)
   
-  return(list(A = A, B = B, C = C, model.name = "LDA"))
+  return(list(A = A, B = B, C = C, model.name = "LDA", prediction = predlda))
 }
 ```
 
 ```{r load_model5}
-record <- rbind(record, iteration_func(model = model_lda, train_data = train_data_sample))
+result_LDA <- iteration_func(model = model_lda, train_data = train_data_sample)
+record <- rbind(record, result_LDA$score)
 ```
 
 ### Model 6
@@ -235,12 +248,13 @@ model_ridge <- function(train_data, test_data = test.data){
   B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
   C <- round(mean(predridge[, dim(predridge)[2]] != test_data$y), 4)
   
-  return(list(A = A, B = B, C = C, model.name = "ridge"))
+  return(list(A = A, B = B, C = C, model.name = "ridge", prediction = predridge[, dim(predridge)[2]]))
 }
 ```
 
 ```{r load_model6}
-record <- rbind(record, iteration_func(model = model_ridge, train_data = train_data_sample))
+result_ridge <- iteration_func(model = model_ridge, train_data = train_data_sample)
+record <- rbind(record, result_ridge$score)
 ```
 
 ### Model 7
@@ -256,12 +270,13 @@ model_lasso <- function(train_data, test_data = test.data){
   B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
   C <- round(mean(predlasso[, dim(predlasso)[2]] != test_data$y), 4)
   
-  return(list(A = A, B = B, C = C, model.name = "lasso"))
+  return(list(A = A, B = B, C = C, model.name = "lasso", prediction = predlasso[, dim(predlasso)[2]]))
 }
 ```
 
 ```{r load_model7}
-record <- rbind(record, iteration_func(model = model_lasso, train_data = train_data_sample))
+result_lasso <- iteration_func(model = model_lasso, train_data = train_data_sample)
+record <- rbind(record, result_lasso$score)
 ```
 
 ### Model 8
