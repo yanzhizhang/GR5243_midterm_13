@@ -1,0 +1,406 @@
+---
+title: "Applied Data Science:  Midterm Project"
+author: ""
+date: ""
+output:
+  prettydoc::html_pretty:
+  theme: cayman
+highlight: github
+---
+
+```{r setup, include=FALSE}
+set.seed(72)
+knitr::opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55))
+```
+
+```{r libraries, echo = FALSE}
+library(data.table)
+library(DT)
+library(data.table)
+library(dplyr)
+library(nnet)
+library(class)
+library(rpart)
+library(randomForest)
+library(glmnet)
+library(e1071)
+library(gbm)
+library(xgboost)
+library(MASS)
+library(klaR)
+library(caret)
+```
+
+```{r source_files}
+
+```
+
+```{r functions}
+create.formula <- function(outcome.name, input.names, input.patterns = NA,all.data.names = NA, return.as = "character") {
+
+  variable.names.from.patterns <- c()
+  if (!is.na(input.patterns[1]) & !is.na(all.data.names[1])) {
+    pattern <- paste(input.patterns, collapse = "|")
+    variable.names.from.patterns <- all.data.names[grep(pattern = pattern,
+    x = all.data.names)]  
+  }
+  
+  all.input.names <- unique(c(input.names, variable.names.from.patterns))
+  all.input.names <- all.input.names[all.input.names !=outcome.name]
+
+  if (!is.na(all.data.names[1])) {
+    all.input.names <- all.input.names[all.input.names %in%
+    all.data.names]
+   }
+
+  input.names.delineated <- sprintf("`%s`", all.input.names)
+  the.formula <- sprintf("`%s` ~ %s", outcome.name, paste(input.names.delineated,collapse = " + "))
+  
+  if (return.as == "formula") {
+     return(as.formula(the.formula))
+  }
+  
+  if (return.as != "formula") {
+     return(the.formula)
+  }
+}
+```
+
+```{r constants}
+n.values <- c(500, 1000, 2000)
+iterations <- 3
+```
+
+```{r load_data}
+train.data <- read.csv("../Data/MNIST-fashion training set-49.csv")
+test.data <- read.csv("../Data/MNIST-fashion testing set-49.csv")
+```
+
+```{r clean_data}
+#normalization
+train.data[,2:50] <- train.data[,2:50]/255
+test.data[,2:50] <- test.data[,2:50]/255
+
+clothes.labels <- as.vector(unique(test.data$label))
+input.names <- names(test.data)[-1]
+output.name <- names(test.data)[1]
+train_formula <- create.formula(outcome.name = output.name, input.names = input.names)
+
+
+```
+
+```{r generate_samples}
+sample_data <- function(n.values){
+  temp_sample_data <- c()
+  for(i in clothes.labels){
+    temp_sample_data <- rbind(temp_sample_data, 
+                              sample_n(train.data[train.data$label==i,], n.values/10) )
+  }
+  return(sample_n(temp_sample_data,n.values))
+}
+for (i in n.values) {
+  for (j in 1:iterations){
+    assign(paste( "dat", i, j, sep = "_" ), 
+           sample_data(i))
+  }
+}
+```
+
+
+## Introduction
+
+
+### Model 1:  Multinomial logistic regression
+
+
+```{r code_model1_development, eval = TRUE}
+multinomial_logistic_regression <- function(train_data, 
+                                            test_data = test.data) {
+  t1 <- Sys.time()
+  model <- multinom(formula = train_formula,
+                    train_data,
+                    trace=FALSE)
+  prediction <- predict(object = model, 
+                  newdata = test_data[,2:50])
+  t2 <- Sys.time()
+  
+  A <-  nrow(train_data) / 60000 
+  B <-  min(1, as.numeric(t2 - t1) / 60) 
+  C <-  mean(prediction != test_data[,1]) 
+  
+  return(list("A" = A, "B" = B, "C" = C, 
+              "model.name" = "Multinomial logistic regression", 
+              "model" = model,
+              "prediction" = prediction))
+}
+```
+
+```{r load_model1}
+multinomial_logistic_regression(train_data = dat_500_1)$C
+```
+
+### Model 2:  K-Nearest Neighbors
+
+
+```{r code_model2_development, eval = TRUE}
+k_nearest_neighbors <- function(train_data, 
+                                test_data = test.data,
+                                K = 5) {
+  t1 <- Sys.time()
+  prediction <- knn(train = train_data[,-1],
+                    test = test_data[,-1],
+                    cl = train_data[,1],
+                    k = K)
+  t2 <- Sys.time()
+  
+  A <-  nrow(train_data) / 60000 
+  B <-  min(1, as.numeric(t2 - t1) / 60) 
+  C <-  mean(prediction != test_data[,1]) 
+  
+  return(list("A" = A, "B" = B, "C" = C, 
+              "model.name" = "5-Nearest Neighbors", 
+              "model" = NA,
+              "prediction" = prediction))
+}
+```
+
+```{r load_model2}
+k_nearest_neighbors(train_data = dat_500_1, K = 5)$C
+```
+
+### Model 3:  Classification Tree
+
+
+```{r code_model3_development, eval = TRUE}
+classification_tree <- function(train_data, 
+                                test_data = test.data) {
+  t1 <- Sys.time()
+  model <- rpart(formula = train_formula,
+                 data = train_data,
+                 method = "class")
+  prediction <- predict(object = model,
+                        newdata = test.data[,-1],
+                        type = "class")
+  t2 <- Sys.time()
+  
+  A <-  nrow(train_data) / 60000 
+  B <-  min(1, as.numeric(t2 - t1) / 60) 
+  C <-  mean(prediction != test_data[,1]) 
+  
+  return(list("A" = A, "B" = B, "C" = C, 
+              "model.name" = "Classification Tree", 
+              "model" = model,
+              "prediction" = prediction))
+}
+```
+
+```{r load_model3}
+classification_tree(train_data = dat_1000_1)$C
+```
+
+### Model 4:  Random Forest
+
+
+```{r code_model4_development, eval = TRUE}
+random_forest <- function(train_data, 
+                          test_data = test.data) {
+  t1 <- Sys.time()
+  model <- randomForest(x = train_data[,-1], 
+                        y = train_data[,1])
+  prediction <- predict(object = model,
+                        newdata = test.data[,-1])
+  t2 <- Sys.time()
+  
+  A <-  nrow(train_data) / 60000 
+  B <-  min(1, as.numeric(t2 - t1) / 60) 
+  C <-  mean(prediction != test_data[,1]) 
+  
+  return(list("A" = A, "B" = B, "C" = C, 
+              "model.name" = "Random Forest", 
+              "model" = model,
+              "prediction" = prediction))
+}
+```
+
+```{r load_model4}
+random_forest(dat_1000_1)$C
+```
+
+### Model 5:  Ridge Regression alpha = 0
+
+
+```{r code_model5_development, eval = TRUE}
+ridge_regression <- function(train_data, 
+                                   test_data = test.data) {
+  t1 <- Sys.time()
+  model <- glmnet(x = as.matrix(train_data[,-1]),
+                  y = as.matrix(train_data[,1]), 
+                  alpha = 0, 
+                  family = "multinomial")
+  prediction <- predict(object = model,
+                        newx = as.matrix(test.data[,-1]),
+                        type = "class")
+  t2 <- Sys.time()
+  
+  A <-  nrow(train_data) / 60000 
+  B <-  min(1, as.numeric(t2 - t1) / 60) 
+  C <-  mean(prediction != test_data[,1]) 
+  
+  return(list("A" = A, "B" = B, "C" = C, 
+              "model.name" = "Support Vector Machines", 
+              "model" = model,
+              "prediction" = prediction))
+}
+```
+
+```{r load_model5}
+ridge_regression(dat_1000_1)$C
+```
+
+### Model 6:  Lasso Regression alpha = 1
+
+
+```{r code_model6_development, eval = TRUE}
+lasso_regression <- function(train_data, 
+                                   test_data = test.data) {
+  t1 <- Sys.time()
+  model <- glmnet(x = as.matrix(train_data[,-1]),
+                  y = as.matrix(train_data[,1]), 
+                  alpha = 1, 
+                  family = "multinomial")
+  prediction <- predict(object = model,
+                        newx = as.matrix(test.data[,-1]),
+                        type = "class")
+  t2 <- Sys.time()
+  
+  A <-  nrow(train_data) / 60000 
+  B <-  min(1, as.numeric(t2 - t1) / 60) 
+  C <-  mean(prediction != test_data[,1]) 
+  
+  return(list("A" = A, "B" = B, "C" = C, 
+              "model.name" = "Support Vector Machines", 
+              "model" = model,
+              "prediction" = prediction))
+}
+```
+
+```{r load_model6}
+lasso_regression(dat_1000_1)$C
+```
+
+### Model 7 : ElasticNet alpha = 0.5
+
+
+```{r code_model7_development, eval = TRUE}
+elastic_net <- function(train_data,
+                        test_data = test.data) {
+  t1 <- Sys.time()
+  model <- glmnet(x = as.matrix(train_data[,-1]),
+                  y = as.matrix(train_data[,1]), 
+                  alpha = 1, 
+                  family = "multinomial")
+  prediction <- predict(object = model,
+                        newx = as.matrix(test.data[,-1]),
+                        type = "class")
+  t2 <- Sys.time()
+  
+  A <-  nrow(train_data) / 60000 
+  B <-  min(1, as.numeric(t2 - t1) / 60) 
+  C <-  mean(prediction != test_data[,1]) 
+  
+  return(list("A" = A, "B" = B, "C" = C, 
+              "model.name" = "Support Vector Machines", 
+              "model" = model,
+              "prediction" = prediction))
+}
+```
+
+```{r load_model7}
+elastic_net(dat_1000_1)$C
+```
+
+### Model 8 :  Support Vector Machines
+
+
+```{r code_model8_development, eval = TRUE}
+support_vector_machine <- function(train_data, 
+                                   test_data = test.data) {
+  t1 <- Sys.time()
+  model <- svm(train_data[,2:50],
+               train_data[,1])
+  prediction <- predict(object = model,
+                        newdata = test.data[,-1])
+  t2 <- Sys.time()
+  
+  A <-  nrow(train_data) / 60000 
+  B <-  min(1, as.numeric(t2 - t1) / 60) 
+  C <-  mean(prediction != test_data[,1]) 
+  
+  return(list("A" = A, "B" = B, "C" = C, 
+              "model.name" = "Support Vector Machines", 
+              "model" = model,
+              "prediction" = prediction))
+}
+```
+
+```{r load_model8}
+support_vector_machine(dat_1000_1)$C
+```
+
+### Model 9:  Neural Network
+
+
+```{r code_model9_development, eval = TRUE}
+neural_network <- function(train_data,
+                           test_data = test.data) {
+  t1 <- Sys.time()
+  model <- nnet(label ~ .,
+                data = train_data, 
+                size = 2,
+                rang = 0.1,
+                decay = 5e-4, 
+                maxit = 200,
+                trace =F)
+  prediction <- predict(object = model,
+                        newdata = test.data[,-1],
+                        type = "class")
+  t2 <- Sys.time()
+  
+  A <-  nrow(train_data) / 60000 
+  B <-  min(1, as.numeric(t2 - t1) / 60) 
+  C <-  mean(prediction != test_data[,1]) 
+  
+  return(list("A" = A, "B" = B, "C" = C, 
+              "model.name" = "Support Vector Machines", 
+              "model" = model,
+              "prediction" = prediction))
+}
+```
+
+```{r load_model9}
+neural_network(dat_500_1)$C
+```
+
+### Model 10
+
+
+```{r code_model10_development, eval = TRUE}
+
+```
+
+```{r load_model10}
+
+```
+
+## Scoreboard
+
+```{r scoreboard}
+
+```
+
+## Discussion
+
+
+## References
+
+

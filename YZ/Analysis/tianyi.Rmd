@@ -1,0 +1,552 @@
+---
+title: "Applied Data Science:  Midterm Project"
+author: ""
+date: ""
+output:
+  prettydoc::html_pretty:
+  theme: cayman
+highlight: github
+---
+
+```{r setup, include=FALSE}
+set.seed(72)
+knitr::opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55))
+```
+
+```{r libraries, echo = FALSE}
+library(data.table)
+library(DT)
+library(class)
+library(glmnet)
+library(randomForest)
+library(e1071)
+library(xgboost)
+library(nnet)
+library(rpart)
+```
+
+```{r source_files}
+train.path <- "../Data/MNIST-fashion training set-49.csv"
+test.path <- "../Data/MNIST-fashion testing set-49.csv"
+```
+
+```{r functions}
+create.formula <- function(outcome.name, input.names, input.patterns = NA,
+all.data.names = NA, return.as = "character") {
+  variable.names.from.patterns <- c()
+  if (!is.na(input.patterns[1]) & !is.na(all.data.names[1])) {
+  pattern <- paste(input.patterns, collapse = "|")
+  variable.names.from.patterns <- all.data.names[grep(pattern = pattern,
+  x = all.data.names)]
+  }
+  all.input.names <- unique(c(input.names, variable.names.from.patterns))
+  all.input.names <- all.input.names[all.input.names !=
+  outcome.name]
+  if (!is.na(all.data.names[1])) {
+  all.input.names <- all.input.names[all.input.names %in%
+  all.data.names]
+  }
+  input.names.delineated <- sprintf("`%s`", all.input.names)
+  the.formula <- sprintf("`%s` ~ %s", outcome.name, paste(input.names.delineated,
+  collapse = " + "))
+  if (return.as == "formula") {
+  return(as.formula(the.formula))
+  }
+  if (return.as != "formula") {
+  return(the.formula)
+  }
+}
+
+model.avg <- function(total.result, model.name){
+  res.list <- data.table()
+  for (i in 0:2){
+    sample.size <- total.result[i*3+1, `Sample size`]
+    size.model.name <- paste(model.name,sample.size,sep='_')
+    proportion <- total.result[i*3+1, A]
+    avg.time <- round((total.result[i*3+1,B] + total.result[i*3+2,B] + total.result[i*3+3,B])/3, 3)
+    avg.error <- round((total.result[i*3+1,C] + total.result[i*3+2,C] + total.result[i*3+3,C])/3, 3)
+    avg.points <- round(round(0.25 * proportion + 0.25 * avg.time + 0.5 * avg.error,3), 3)
+    tmp.datatable <- data.table("Model" = size.model.name,"Sample size" = sample.size,
+                                "A" = proportion, "B" = avg.time, "C" = avg.error, 
+                                "Points" = avg.points)
+    res.list <- rbind(res.list,tmp.datatable)
+  }
+  return(res.list)
+}
+```
+
+```{r constants}
+n.values <- c(500, 1000, 2000)
+iterations <- 3
+predictions <- list()
+runtimes <- list()
+result1 <- data.table()
+result2 <- data.table()
+```
+
+```{r load_data}
+train.data <- fread(train.path)
+test.data <- fread(test.path)
+```
+
+```{r clean_data}
+train.data$label <-as.factor(train.data$label)
+test.data$label <- as.factor(test.data$label)
+train.list <- list()
+res.group <- unique(train.data$label)
+classify.label <- function(n,data){
+  return(data[data$label==res.group[n]])
+}
+for(i in 1:length(res.group)){
+  assign(paste("train.group",i,sep=''),classify.label(i,train.data))
+  train.list[[i]] <- get(paste("train.group",i,sep=''))
+}
+```
+
+```{r generate_samples}
+generate_sample <- function(n.value=10500,train.list){
+  result <- list()
+  dat_group_list <- list()
+  n.value.group <- n.value/10
+  res <- data.table()
+  for (i in 1:10) {
+    index <- sample(6000,n.value.group)
+    res <- rbind(res,train.list[[i]][index,])
+  }
+dat_list <- list()
+for (i in 1:10) {
+  i_lower <- (i-1)*1050+1
+  i_upper <- i*1050
+  dat_tmp <- res[i_lower:i_upper]
+  dat_list[[i]] <- dat_tmp
+}
+
+piece <- c(0,50,100,150,250,350,450,650,850,1050)
+for (i in 1:9) {
+  b <- i %% 3 + 1
+  if(i<=3){
+    a <- 500
+  }
+  else if(i<=6){
+    a <- 1000
+  }else{
+    a <- 2000
+  }
+  lower <- piece[i] + 1
+  upper <- piece[i+1]
+  tmp <- data.frame()
+  for(j in 1:10){
+    tp <- dat_list[[j]][lower:upper]
+    tmp <- rbind(tmp,tp)
+    
+  }
+  assign(paste("dat",a,b,sep='_'), tmp)
+  result[[i]] <- get(paste("dat",a,b,sep="_"))
+}
+return(result)
+}
+
+dat_whole_1 <- generate_sample(10500, train.list)
+
+```
+
+
+## Introduction
+
+
+### Model 1:  
+
+```{r code_model1_development, eval = TRUE}
+Classification.tree.formula <- create.formula("label",names(train.data)[2:50])
+classify.tree.model <- function(train.list,formula.tree){
+  res.list <- data.table()
+  for (i in 1:length(train.list)) {
+    num <- ifelse(i %% 3 == 0, 3, i %% 3)
+    sample.size = nrow(train.list[[i]])
+    model.name <- paste("classiftree",sample.size,num,sep='_')
+    proportion <- round(sample.size/60000,3)
+    t.start <- Sys.time()
+    model.classiftree <- rpart(formula = formula.tree, data=train.list[[i]],method="class")
+    t.end <- Sys.time()
+    time <- round(min(1,(t.end - t.start)/60),3)
+    preds <- predict(model.classiftree, newdata = test.data[,2:50], type = "class")
+    error <- round(mean(preds != test.data$label),2)
+    Points <- round(0.25 * proportion + 0.25 * time + 0.5 * error,3)
+    tmp.datatable <- data.table("Model" = model.name,"Sample size" = sample.size,
+                                "A" = proportion, "B" = time, "C" = error, 
+                                "Points" = Points)
+    res.list <- rbind(res.list,tmp.datatable)
+    predictions[[i]] <<- as.data.frame(preds)
+    runtimes[[i]] <<- as.data.frame(time)
+  }
+  return(res.list)
+}
+```
+
+```{r load_model1}
+classify.tree.table <- classify.tree.model(dat_whole_1,Classification.tree.formula)
+datatable(classify.tree.table, rownames = FALSE)
+classify.tree.avg.table <- model.avg(classify.tree.table, "classifytree")
+datatable(classify.tree.avg.table, rownames = FALSE)
+result1 <- rbind(result1,classify.tree.table)
+result2 <- rbind(result2,classify.tree.avg.table)
+```
+
+
+### Model 2:  
+
+Random Forest
+```{r code_model2_development, eval = TRUE}
+#toc <- Sys.time()
+#model.randomf.1 <- randomForest(dat_500_1[,2:50],dat_500_1$label)
+#tic <- Sys.time()
+#time.randomf.1 <- tic-toc
+rf.model <- function(train.list,n.tree = 500){
+  res.list <- data.table()
+  for (i in 1:length(train.list)) {
+    num <- ifelse(i %% 3 == 0, 3, i %% 3)
+    sample.size = nrow(train.list[[i]])
+    model.name <- paste("randomforest",sample.size,num,sep='_')
+    proportion <- round(sample.size/60000,3)
+    t.start <- Sys.time()
+    model.randomf <- randomForest(train.list[[i]][,2:50], train.list[[i]]$label,
+                                  ntree = n.tree)
+    t.end <- Sys.time()
+    time <- round(min(1,(t.end - t.start)/60),3)
+    preds <- predict(model.randomf, newdata = test.data[,2:50], predict.all=TRUE)
+    error <- round(mean(preds$aggregate != test.data$label),2)
+    Points <- round(0.25 * proportion + 0.25 * time + 0.5 * error,3)
+    tmp.datatable <- data.table("Model" = model.name,"Sample size" = sample.size,
+                                "A" = proportion, "B" = time, "C" = error, 
+                                "Points" = Points)
+    res.list <- rbind(res.list,tmp.datatable)
+    predictions[[i]] <<- cbind(predictions[[i]],as.data.frame(preds$aggregate))
+    runtimes[[i]] <<- cbind(runtimes[[i]],as.data.frame(time))
+  }
+  return(res.list)
+}
+
+```
+
+```{r load_model2}
+rf.table <- rf.model(train.list = dat_whole_1)
+datatable(rf.table, rownames = FALSE)
+rf.avg.table <- model.avg(rf.table, "randomforest")
+datatable(rf.avg.table, rownames = FALSE)
+result1 <- rbind(result1,rf.table)
+result2 <- rbind(result2,rf.avg.table)
+```
+
+
+### Model 3:  
+
+
+```{r code_model3_development, eval = TRUE}
+#rf.model <- function(train.list,n.tree = 500){
+#  res.list <- data.table()
+#  for (i in 1:length(train.list)) {
+#    num <- ifelse(i %% 3 == 0, 3, i %% 3)
+#    sample.size = nrow(train.list[[i]])
+#    model.name <- paste("randomforest",sample.size,num,sep='_')
+#    proportion <- round(sample.size/60000,3)
+#    t.start <- Sys.time()
+#    model.randomf <- randomForest(train.list[[i]][,2:50],train.list[[i]]$label,
+#                                  ntree = n.tree)
+#    t.end <- Sys.time()
+#    time <- round(min(1,(t.end - t.start)/60),3)
+#    preds <- predict(model.randomf, newdata = test.data[,2:50], predict.all=TRUE)
+#    error <- round(mean(preds$aggregate != test.data$label),2)
+#   Points <- round(0.25 * proportion + 0.25 * time + 0.5 * error,3)
+#    tmp.datatable <- data.table("Model" = model.name,"Sample size" = sample.size,
+#                                "A" = proportion, "B" = time, "C" = error, 
+#                               "Points" = Points)
+#    res.list <- rbind(res.list,tmp.datatable)
+#  }
+#  return(res.list)
+#}
+```
+
+```{r load_model3}
+rf.table.new <- rf.model(train.list = dat_whole_1, n.tree = 100)
+rf.avg.table.new <- model.avg(rf.table.new, "randomforest")
+result1 <- rbind(result1,rf.table.new)
+result2 <- rbind(result2,rf.avg.table.new)
+```
+
+### Model 4
+
+
+```{r code_model4_development, eval = TRUE}
+svm.model <- function(train.list){
+  res.list <- data.table()
+  for (i in 1:length(train.list)) {
+    num <- ifelse(i %% 3 == 0, 3, i %% 3)
+    sample.size = nrow(train.list[[i]])
+    model.name <- paste("svm",sample.size,num,sep='_')
+    proportion <- round(sample.size/60000,3)
+    t.start <- Sys.time()
+    model.svm <- svm(train.list[[i]][,2:50], train.list[[i]]$label)
+    preds <- predict(model.svm, newdata = test.data[,2:50])
+    t.end <- Sys.time()
+    time <- round(min(1,(t.end - t.start)/60),3)
+    error <- round(1-sum(test.data$label==preds)/nrow(test.data),2)
+    Points <- round(0.25 * proportion + 0.25 * time + 0.5 * error,3)
+    tmp.datatable <- data.table("Model" = model.name,"Sample size" = sample.size,
+                                "A" = proportion, "B" = time, "C" = error, 
+                                "Points" = Points)
+    res.list <- rbind(res.list,tmp.datatable)
+    predictions[[i]] <<- cbind(predictions[[i]],as.data.frame(preds,col.names = c("svm")))
+    runtimes[[i]] <<- cbind(runtimes[[i]],as.data.frame(time))
+  }
+  return(res.list)
+}
+```
+
+```{r load_model4}
+svm.table <- svm.model(train.list = dat_whole_1)
+datatable(svm.table, rownames = FALSE)
+svm.avg.table <- model.avg(svm.table, "svm")
+datatable(svm.avg.table, rownames = FALSE)
+result1 <- rbind(result1,svm.table)
+result2 <- rbind(result2,svm.avg.table)
+```
+
+
+### Model 5
+
+
+```{r code_model5_development, eval = TRUE}
+nb.model <- function(train.list){
+  res.list <- data.table()
+  for (i in 1:length(train.list)) {
+    num <- ifelse(i %% 3 == 0, 3, i %% 3)
+    sample.size = nrow(train.list[[i]])
+    model.name <- paste("naivebayes",sample.size,num,sep='_')
+    proportion <- round(sample.size/60000,3)
+    t.start <- Sys.time()
+    model.nb <- naiveBayes(train.list[[i]][,2:50], train.list[[i]]$label)
+    preds <- predict(model.nb, newdata = test.data[,2:50])
+    t.end <- Sys.time()
+    time <- round(min(1,(t.end - t.start)/60),3)
+    error <- round(1-sum(test.data$label==preds)/nrow(test.data),2)
+    Points <- round(0.25 * proportion + 0.25 * time + 0.5 * error,3)
+    tmp.datatable <- data.table("Model" = model.name,"Sample size" = sample.size,
+                                "A" = proportion, "B" = time, "C" = error, 
+                                "Points" = Points)
+    res.list <- rbind(res.list,tmp.datatable)
+    predictions[[i]] <<- cbind(predictions[[i]],as.data.frame(preds))
+    runtimes[[i]] <<- cbind(runtimes[[i]],as.data.frame(time))
+  }
+  return(res.list)
+}
+```
+
+```{r load_model5}
+nb.table <- nb.model(dat_whole_1)
+datatable(nb.table)
+nb.avg.table <- model.avg(nb.table, "naivebayes")
+datatable(nb.avg.table, rownames = FALSE)
+result1 <- rbind(result1,nb.table)
+result2 <- rbind(result2,nb.avg.table)
+```
+
+
+### Model 6
+
+
+```{r code_model6_development, eval = TRUE}
+nn.model <- function(train.list){
+  res.list <- data.table()
+  for (i in 1:length(train.list)) {
+    num <- ifelse(i %% 3 == 0, 3, i %% 3)
+    sample.size = nrow(train.list[[i]])
+    model.name <- paste("neuralnetworks",sample.size,num,sep='_')
+    proportion <- round(sample.size/60000,3)
+    t.start <- Sys.time()
+    model.nn <- nnet(label ~ ., data = train.list[[i]], size = 15, rang = 0.5,
+                     decay = 5e-3, trace =F)
+    preds <- predict(model.nn, newdata = test.data[,2:50], type = "class")
+    t.end <- Sys.time()
+    time <- round(min(1,(t.end - t.start)/60),3)
+    error <- round(1-sum(test.data$label==preds)/nrow(test.data),2)
+    Points <- round(0.25 * proportion + 0.25 * time + 0.5 * error,3)
+    tmp.datatable <- data.table("Model" = model.name,"Sample size" = sample.size,
+                                "A" = proportion, "B" = time, "C" = error, 
+                                "Points" = Points)
+    res.list <- rbind(res.list,tmp.datatable)
+    predictions[[i]] <<- cbind(predictions[[i]],as.data.frame(preds))
+    runtimes[[i]] <<- cbind(runtimes[[i]],as.data.frame(time))
+  }
+  return(res.list)
+}
+```
+
+```{r load_model6}
+nn.table <- nn.model(dat_whole_1)
+datatable(nn.table, rownames = FALSE)
+nn.avg.table <- model.avg(nn.table, "neuralnetworks")
+datatable(nn.avg.table, rownames = FALSE)
+result1 <- rbind(result1,nn.table)
+result2 <- rbind(result2,nn.avg.table)
+```
+
+### Model 7
+
+
+```{r code_model7_development, eval = TRUE}
+# multinomial linear regression
+
+library(nnet)
+
+mlr.model <- function(train.list){
+  res.list <- data.table()
+  for (i in 1:length(train.list)) {
+    num <- ifelse(i %% 3 == 0, 3, i %% 3)
+    sample.size = nrow(train.list[[i]])
+    model.name <- paste("multinom",sample.size,num,sep='_')
+    proportion <- round(sample.size/60000,3)
+    t.start <- Sys.time()
+    model.mlr <- multinom(label ~., data = train.list[[i]])
+    preds <- predict(model.mlr, newdata = test.data, predict.all=TRUE)
+    t.end <- Sys.time()
+    time <- round(min(1,(t.end - t.start)/60),3)
+    error <- round(mean(preds != test.data$label),2)
+    Points <- round(0.25 * proportion + 0.25 * time + 0.5 * error,3)
+    tmp.datatable <- data.table("Model" = model.name,"Sample size" = sample.size,
+                                "A" = proportion, "B" = time, "C" = error, 
+                                "Points" = Points)
+    res.list <- rbind(res.list,tmp.datatable)
+    predictions[[i]] <<- cbind(predictions[[i]],as.data.frame(preds))
+    runtimes[[i]] <<- cbind(runtimes[[i]],as.data.frame(time))
+  }
+  return(res.list)
+}
+```
+
+```{r load_model7}
+mlr.table <- mlr.model(dat_whole_1)
+datatable(mlr.table)
+mlr.avg.table <- model.avg(mlr.table, "multinomial logistic regression")
+datatable(mlr.avg.table, rownames = FALSE)
+result1 <- rbind(result1,mlr.table)
+result2 <- rbind(result2,mlr.avg.table)
+```
+
+### Model 8
+
+
+```{r code_model8_development, eval = TRUE}
+# knn 3
+
+library(class)
+
+normalize <- function(x) {return ((x - min(x)) / (max(x) - min(x)))}
+
+knn.model <- function(train.list,knn.k){
+  res.list <- data.table()
+  for (i in 1:length(train.list)) {
+    num <- ifelse(i %% 3 == 0, 3, i %% 3)
+    sample.size = nrow(train.list[[i]])
+    model.name <- paste("multinom",sample.size,num,sep='_')
+    proportion <- round(sample.size/60000,3)
+    t.start <- Sys.time()
+    knn.train <- train.list[[i]][,2:50]
+    knn.train <- as.data.frame(lapply(knn.train, normalize))
+    knn.cl <- train.list[[i]]$label
+    knn.test <- test.data[,2:50]
+    knn.test <- as.data.frame(lapply(knn.test, normalize))
+    model.knn <- knn(train = knn.train, test = knn.test, cl = knn.cl, k = knn.k)
+    t.end <- Sys.time()
+    time <- round(min(1,(t.end - t.start)/60),3)
+    error <- round(mean(model.knn != test.data$label),2)
+    Points <- round(0.25 * proportion + 0.25 * time + 0.5 * error,3)
+    tmp.datatable <- data.table("Model" = model.name,"Sample size" = sample.size,
+                                "A" = proportion, "B" = time, "C" = error, 
+                                "Points" = Points)
+    res.list <- rbind(res.list,tmp.datatable)
+    predictions[[i]] <<- cbind(predictions[[i]],as.data.frame(model.knn, col.names=c("knn")))
+    runtimes[[i]] <<- cbind(runtimes[[i]],as.data.frame(time))
+  }
+  return(res.list)
+}
+
+```
+
+```{r load_model8}
+knn3.table <- knn.model(dat_whole_1,3)
+datatable(knn3.table)
+knn3.avg.table <- model.avg(knn3.table, "knn3")
+datatable(knn3.avg.table, rownames = FALSE)
+result1 <- rbind(result1,knn3.table)
+result2 <- rbind(result2,knn3.avg.table)
+```
+
+### Model 9
+
+
+```{r code_model9_development, eval = TRUE}
+
+```
+
+```{r load_model9}
+knn7.table <- knn.model(dat_whole_1,7)
+datatable(knn7.table)
+knn7.avg.table <- model.avg(knn7.table, "knn7")
+datatable(knn7.avg.table, rownames = FALSE)
+result1 <- rbind(result1,knn7.table)
+result2 <- rbind(result2,knn7.avg.table)
+```
+
+### Model 10
+
+
+```{r code_model10_development, eval = TRUE}
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+agg.model <- function(train.list,rt){
+  res.list <- data.table()
+  for (i in 1:length(train.list)) {
+    num <- ifelse(i %% 3 == 0, 3, i %% 3)
+    sample.size = nrow(dat_whole_1[[i]])
+    model.name <- paste("aggregate",sample.size,num,sep='_')
+    proportion <- round(sample.size/60000,3)
+    preds <- apply(data.table(train.list[[i]]),1,getmode)
+    time <- apply(data.table(rt[[i]]),1,mean)
+    time <- round(min(1,time),3)
+    error <- round(1-sum(test.data$label==preds)/nrow(test.data),2)
+    Points <- round(0.25 * proportion + 0.25 * time + 0.5 * error,3)
+    tmp.datatable <- data.table("Model" = model.name,"Sample size" = sample.size,
+                                "A" = proportion, "B" = time, "C" = error, 
+                                "Points" = Points)
+    res.list <- rbind(res.list,tmp.datatable)
+    predictions[[i]] <<- cbind(predictions[[i]],as.data.frame(preds))
+  }
+  return(res.list)
+}
+```
+
+```{r load_model10}
+agg.table <- agg.model(predictions,runtimes)
+datatable(agg.table)
+agg.avg.table <- model.avg(agg.table, "aggregate")
+datatable(agg.avg.table, rownames = FALSE)
+result1 <- rbind(result1,agg.table)
+result2 <- rbind(result2,agg.avg.table)
+```
+
+## Scoreboard
+
+```{r scoreboard}
+datatable(result1)
+datatable(result2)
+```
+
+## Discussion
+
+
+## References
+
+

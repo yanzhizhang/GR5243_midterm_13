@@ -29,6 +29,7 @@ library(xgboost)
 library(MASS)
 library(klaR)
 library(caret)
+library(caretEnsemble)
 ```
 
 ```{r source_files}
@@ -73,18 +74,6 @@ create.formula <- function(outcome.name, input.names, input.patterns = NA,all.da
      return(the.formula)
   }
 }
-
-
-create.x.and.y <- function(the.formula, data) {
-   require(data.table)
-   setDT(data)
-   x <- model.matrix(object = as.formula(the.formula),data = data)
-   y.name <- trimws(x = gsub(pattern = "`", replacement = "",
-   x = strsplit(x = the.formula, split = "~")[[1]][1],fixed = TRUE))
-   y <- data[as.numeric(rownames(x)), get(y.name)]
-  return(list(x = x, y = y))
-}
-
 
 score <- function(data,function_name)
 {
@@ -307,11 +296,17 @@ nn <- function(data)
 score(dat_500_1,nn)
 ```
 
-### Model 10
+### Model 10 Ensemble
 
 
 ```{r code_model10_development, eval = TRUE}
-
+control <- trainControl(method="repeatedcv", number=10, repeats=3, savePredictions=TRUE, classProbs=TRUE)
+algorithmList <- c('lda', 'rpart', 'glm', 'knn', 'svmRadial')
+set.seed(0)
+models <- caretList(label~., data = data, trControl=control, methodList = algorithmList)
+results <- resamples(models)
+summary(results)
+dotplot(results)
 ```
 
 ```{r load_model10}

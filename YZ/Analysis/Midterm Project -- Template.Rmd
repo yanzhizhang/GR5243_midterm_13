@@ -1,0 +1,348 @@
+---
+title: "Applied Data Science:  Midterm Project"
+author: ""
+date: ""
+output:
+  prettydoc::html_pretty:
+  theme: cayman
+highlight: github
+---
+
+```{r setup, include=FALSE}
+set.seed(72)
+knitr::opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55))
+```
+
+```{r libraries, echo = FALSE}
+library(data.table)
+library(DT)
+library(rpart)
+library(plyr)
+library(FNN)
+library(randomForest)
+library(e1071)
+library(glmnet)
+library(MASS)
+library(gbm)
+library(nnet)
+```
+
+```{r source_files}
+```
+
+```{r constants}
+n.values <- c(500, 1000, 2000)
+iterations <- 3
+# Data is 28 pixels big in width and height
+img_rows <- img_cols <- 7
+sample_size <- c(rep(n.values[1], 3), rep(n.values[2], 3), rep(n.values[3], 3))
+test_size = 10000
+```
+
+
+```{r load_data}
+train.data <- read.csv("../Data/MNIST-fashion training set-49.csv")
+test.data <- read.csv("../Data/MNIST-fashion testing set-49.csv")
+```
+
+```{r clean_data}
+#' Data is transformed to matrix (because they are easier indexable) and  pixels
+#' are separated from labels.
+x_train <- as.matrix(train.data[, 2:dim(train.data)[2]]) / 255
+y_train <- as.matrix(train.data[, 1])
+
+# The same for test set.
+x_test <- as.matrix(test.data[, 2:dim(train.data)[2]]) / 255
+y_test <- as.matrix(test.data[, 1])
+
+test.data <- list(x = x_test, y = y_test)
+
+clothes.labels <- as.vector(unique(y_train))
+```
+
+```{r functions}
+sample_data <- function(sample_size){
+  dat <- c()
+  l <- length(clothes.labels)
+  for(i in clothes.labels){
+    dat <- c(dat, sample(which(y_train == i), size = sample_size / l))
+  }
+  return(list("x" = x_train[dat, ], "y" = y_train[dat, ]))
+}
+
+iteration_func <- function(model, train_data, test_data = test.data) {
+  #result <- laply(train_data, model)
+  result <- data.frame(A = NULL, B = NULL, C = NULL, name = NULL)
+  prediction <- data.frame(rep(0, test_size))
+  for(i in 1:length(sample_size)) {
+    mod <- model(train_data[[i]], test_data)
+    result<- rbind(result, data.table(mod$A, mod$B, mod$C, mod$model.name))
+    prediction <- cbind(prediction, mod$prediction)
+  }
+  Data <- paste("dat_", sample_size, "_", rep(c(1, 2, 3), 3), sep = "")
+  Data <- cbind(sample_size, Data)
+  result <- cbind(result[, 4], cbind(Data, result[,1:3]))
+  colnames(result) <- c("Model", "Sample Size", "Data", "A", "B", "C")
+  result <- as.data.table(result)
+  return(list(score = result, prediction = prediction[, -1]))
+}
+
+# score record of model
+score <- function(x) {
+  x <- data.table(x, Points = round(0.25 * x$A + 0.25 * x$B + 0.5 * x$C, digits = 4))
+  return(x)
+}
+
+#summary score, merge records with same model and same sample size into one record
+score_summary <- function(x) {
+  x <- x[, .(A = round(mean(A), 4), 
+             B = round(mean(B), 4),
+             C = round(mean(C), 4),
+             Points = round(mean(Points), 4)),
+         by = c("Model", "Sample Size")]
+  return(x)
+}
+```
+
+```{r generate_samples}
+train_data_sample <- alply(sample_size, 1, sample_data)
+```
+
+```{r playground}
+
+```
+
+## Introduction
+
+
+### Model 1:  
+
+
+```{r code_model1_development, eval = TRUE}
+record <- data.table()
+
+model_5NN <- function(train_data, test_data = test.data){
+  t1 <- Sys.time()
+  test_pred_knn <- knn(train = train_data$x,
+                       test = test_data$x,
+                       cl = train_data$y,
+                       k = 5)
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(test_pred_knn != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "5-NN", prediction = test_pred_knn))
+}
+```
+
+```{r load_model1}
+result_5NN <- iteration_func(train_data = train_data_sample, model = model_5NN)
+record <- rbind(record, result_5NN$score)
+record
+```
+
+### Model 2:  
+
+
+```{r code_model2_development, eval = TRUE}
+model_randomForest <- function(train_data, test_data = test.data) {
+  t1 <- Sys.time()
+  outRf <- randomForest(x = train_data$x, 
+                        y = factor(train_data$y), 
+                        maxnodes = 1000)
+  predRf <- predict(outRf, test_data$x)
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(predRf != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "Random Forest", prediction = predRf))
+}
+```
+
+```{r load_model2}
+result_Rf <- iteration_func(train_data = train_data_sample, model = model_randomForest)
+record <- rbind(record, result_Rf$score)
+record
+```
+
+### Model 3:  
+
+
+```{r code_model3_development, eval = TRUE}
+model_svm <- function(train_data, test_data = test.data){
+  t1 <- Sys.time()
+  outSvm <- svm(x = train_data$x, 
+                y = factor(train_data$y), 
+                kernel="radial", 
+                cost = 1)
+  predSvm <- predict(outSvm, test_data$x)
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(predSvm != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "SVM", prediction = predSvm))
+}
+```
+
+```{r load_model3}
+result_SVM <- iteration_func(model = model_svm, train_data = train_data_sample)
+record <- rbind(record, result_SVM$score)
+record
+```
+
+### Model 4
+
+
+```{r code_model4_development, eval = TRUE}
+model_glm <- function(train_data, test_data = test.data){
+  t1 <- Sys.time()
+  glm.fit <- glmnet(x = train_data$x, 
+                    y = as.factor(train_data$y), 
+                    family = "multinomial")
+  predglm <- predict(object = glm.fit, newx = test_data$x, type = "class")
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(predglm[, ncol(predglm)] != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "glm", prediction = predglm[, ncol(predglm)]))
+}
+```
+
+```{r load_model4}
+result_glm <- iteration_func(model = model_glm, train_data = train_data_sample)
+record <- rbind(record, result_glm$score)
+record
+```
+
+### Model 5
+
+
+```{r code_model5_development, eval = TRUE}
+model_lda <- function(train_data, test_data = test.data){
+  t1 <- Sys.time()
+  outlda <- lda(x = train_data$x, 
+                grouping = train_data$y)
+  predlda <- predict(outlda, test_data$x)$class
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(predlda != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "LDA", prediction = predlda))
+}
+```
+
+```{r load_model5}
+result_LDA <- iteration_func(model = model_lda, train_data = train_data_sample)
+record <- rbind(record, result_LDA$score)
+record
+```
+
+### Model 6
+
+
+```{r code_model6_development, eval = TRUE}
+model_ridge <- function(train_data, test_data = test.data){
+  t1 <- Sys.time()
+  ridge <- glmnet(x = train_data$x, as.factor(train_data$y), alpha = 0, family = "multinomial")
+  predridge <- predict(object = ridge, newx = test_data$x,type = "class")
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(predridge[, dim(predridge)[2]] != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "ridge", prediction = predridge[, dim(predridge)[2]]))
+}
+```
+
+```{r load_model6}
+result_ridge <- iteration_func(model = model_ridge, train_data = train_data_sample)
+record <- rbind(record, result_ridge$score)
+record
+```
+
+### Model 7
+
+
+```{r code_model7_development, eval = TRUE}
+model_lasso <- function(train_data, test_data = test.data){
+  t1 <- Sys.time()
+  lasso <- glmnet(x = train_data$x, as.factor(train_data$y), alpha = 1, family = "multinomial")
+  predlasso <- predict(object = lasso, newx = test_data$x, type="class")
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(predlasso[, dim(predlasso)[2]] != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "lasso", prediction = predlasso[, dim(predlasso)[2]]))
+}
+```
+
+```{r load_model7}
+result_lasso <- iteration_func(model = model_lasso, train_data = train_data_sample)
+record <- rbind(record, result_lasso$score)
+record
+```
+
+### Model 8
+
+
+```{r code_model8_development, eval = TRUE}
+model_gbm <- function(train_data, test_data = test.data){
+  t1 <- Sys.time()
+  gbm_fit <- gbm()
+  pred_gbm <- predict(object = gbm_fit, newx = test_data$x, type="class")
+  t2 <- Sys.time()
+  A <- round(length(train_data$y) / 60000, 4)
+  B <- round(min(1, as.numeric(t2 - t1) / 60), 4)
+  C <- round(mean(pred_gbm[, dim(pred_gbm)[2]] != test_data$y), 4)
+  
+  return(list(A = A, B = B, C = C, model.name = "lasso", prediction = pred_gbm[, dim(pred_gbm)[2]]))
+}
+```
+
+```{r load_model8}
+result_gbm <- iteration_func(model = model_gbm, train_data = train_data_sample)
+record <- rbind(record, result_gbm$score)
+record
+```
+
+### Model 9
+
+
+```{r code_model9_development, eval = TRUE}
+
+```
+
+```{r load_model9}
+
+```
+
+### Model 10
+
+
+```{r code_model10_development, eval = TRUE}
+
+```
+
+```{r load_model10}
+
+```
+
+## Scoreboard
+
+```{r scoreboard}
+score_total <- score(record); score_total
+score_summary(score_total)
+```
+
+## Discussion
+
+
+## References
+
+
