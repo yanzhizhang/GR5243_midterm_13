@@ -16,11 +16,11 @@ knitr::opts_chunk$set(echo = TRUE, comment="", warning = FALSE, message = FALSE,
 ```{r libraries, echo = FALSE}
 library(data.table)
 library(DT)
-library(data.table)
 library(dplyr)
 library(nnet)
 library(class)
 library(rpart)
+library(FNN)
 library(randomForest)
 library(glmnet)
 library(e1071)
@@ -36,6 +36,18 @@ library(caret)
 ```
 
 ```{r functions}
+round.numerics <- function(x, digits = 4) {
+    if (is.numeric(x)) {
+        x <- round(x = x, digits = digits)
+    }
+    return(x)
+}
+
+get.mode <- function(v) {
+   unique_element <- unique(v)
+   return(unique_element[which.max(tabulate(match(v, unique_element)))])
+}
+
 create.formula <- function(outcome.name, input.names, input.patterns = NA,all.data.names = NA, return.as = "character") {
 
   variable.names.from.patterns <- c()
@@ -64,11 +76,47 @@ create.formula <- function(outcome.name, input.names, input.patterns = NA,all.da
      return(the.formula)
   }
 }
+
+iteration_model <- function(learning_model,
+                            train_data_list,
+                            test_data = test.data) {
+  
+  prediction <- list()
+  result <- c()
+  for(i in names(train_data_list)) {
+    model <- learning_model(train_data_list[[i]])
+    result<- rbind(result,
+                   c(model$model.name, 
+                     nrow(train_data_list[[i]]), 
+                     i, 
+                     model$A, model$B, model$C,
+                     score_model(model)))
+    prediction[i] <- list(model$prediction)
+  }
+  dt_result <- data.table(result)
+  setnames(dt_result, c("Model", "Sample Size", "Data", "A", "B", "C", "Points"))
+  return(list("table" = dt_result, 
+              "prediction" = prediction))
+}
+
+score_model <- function(x) {
+  return(0.25 * x$A + 0.25 * x$B + 0.5 * x$C)
+}
+
+score_summary <- function(x) {
+  x <- x[, .(A = round(mean(A), 4), 
+             B = round(mean(B), 4),
+             C = round(mean(C), 4),
+             Points = round(mean(Points), 4)),
+         by = c("Model", "Sample Size")]
+  return(x)
+}
 ```
 
 ```{r constants}
 n.values <- c(500, 1000, 2000)
 iterations <- 3
+cols <- c("Sample Size", "A", "B", "C", "Points")
 ```
 
 ```{r load_data}
@@ -86,7 +134,6 @@ input.names <- names(test.data)[-1]
 output.name <- names(test.data)[1]
 train_formula <- create.formula(outcome.name = output.name, input.names = input.names)
 
-
 ```
 
 ```{r generate_samples}
@@ -98,10 +145,11 @@ sample_data <- function(n.values){
   }
   return(sample_n(temp_sample_data,n.values))
 }
+
+sample_data_list <- list()
 for (i in n.values) {
   for (j in 1:iterations){
-    assign(paste( "dat", i, j, sep = "_" ), 
-           sample_data(i))
+    sample_data_list[[paste( "dat", i, j, sep = "_" )]] <-  sample_data(i)
   }
 }
 ```
@@ -136,7 +184,14 @@ multinomial_logistic_regression <- function(train_data,
 ```
 
 ```{r load_model1}
-multinomial_logistic_regression(train_data = dat_500_1)$C
+temp_summary <- iteration_model(learning_model = multinomial_logistic_regression,
+                                train_data_list = sample_data_list)
+temp_table <- temp_summary$table
+temp_table[, cols] <- temp_summary$table[, lapply(.SD, as.numeric), .SDcols=cols]
+datatable(temp_table[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+prediction_model1 <- temp_summary$prediction
+
+score_board <- temp_table[,-"Data"]
 ```
 
 ### Model 2:  K-Nearest Neighbors
@@ -165,7 +220,14 @@ k_nearest_neighbors <- function(train_data,
 ```
 
 ```{r load_model2}
-k_nearest_neighbors(train_data = dat_500_1, K = 5)$C
+temp_summary <- iteration_model(learning_model = k_nearest_neighbors,
+                                train_data_list = sample_data_list)
+temp_table <- temp_summary$table
+temp_table[, cols] <- temp_summary$table[, lapply(.SD, as.numeric), .SDcols=cols]
+datatable(temp_table[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+prediction_model2 <- temp_summary$prediction
+
+score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
 ### Model 3:  Classification Tree
@@ -195,7 +257,14 @@ classification_tree <- function(train_data,
 ```
 
 ```{r load_model3}
-classification_tree(train_data = dat_1000_1)$C
+temp_summary <- iteration_model(learning_model = classification_tree,
+                                train_data_list = sample_data_list)
+temp_table <- temp_summary$table
+temp_table[, cols] <- temp_summary$table[, lapply(.SD, as.numeric), .SDcols=cols]
+datatable(temp_table[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+prediction_model3 <- temp_summary$prediction
+
+score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
 ### Model 4:  Random Forest
@@ -223,7 +292,14 @@ random_forest <- function(train_data,
 ```
 
 ```{r load_model4}
-random_forest(dat_1000_1)$C
+temp_summary <- iteration_model(learning_model = random_forest,
+                                train_data_list = sample_data_list)
+temp_table <- temp_summary$table
+temp_table[, cols] <- temp_summary$table[, lapply(.SD, as.numeric), .SDcols=cols]
+datatable(temp_table[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+prediction_model4 <- temp_summary$prediction
+
+score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
 ### Model 5:  Ridge Regression alpha = 0
@@ -247,14 +323,21 @@ ridge_regression <- function(train_data,
   C <-  mean(prediction != test_data[,1]) 
   
   return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Support Vector Machines", 
+              "model.name" = "Ridge Regression", 
               "model" = model,
               "prediction" = prediction))
 }
 ```
 
 ```{r load_model5}
-ridge_regression(dat_1000_1)$C
+temp_summary <- iteration_model(learning_model = ridge_regression,
+                                train_data_list = sample_data_list)
+temp_table <- temp_summary$table
+temp_table[, cols] <- temp_summary$table[, lapply(.SD, as.numeric), .SDcols=cols]
+datatable(temp_table[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+prediction_model5 <- temp_summary$prediction
+
+score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
 ### Model 6:  Lasso Regression alpha = 1
@@ -278,14 +361,21 @@ lasso_regression <- function(train_data,
   C <-  mean(prediction != test_data[,1]) 
   
   return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Support Vector Machines", 
+              "model.name" = "Lasso Regression", 
               "model" = model,
               "prediction" = prediction))
 }
 ```
 
 ```{r load_model6}
-lasso_regression(dat_1000_1)$C
+temp_summary <- iteration_model(learning_model = lasso_regression,
+                                train_data_list = sample_data_list)
+temp_table <- temp_summary$table
+temp_table[, cols] <- temp_summary$table[, lapply(.SD, as.numeric), .SDcols=cols]
+datatable(temp_table[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+prediction_model6 <- temp_summary$prediction
+
+score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
 ### Model 7 : ElasticNet alpha = 0.5
@@ -309,14 +399,21 @@ elastic_net <- function(train_data,
   C <-  mean(prediction != test_data[,1]) 
   
   return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Support Vector Machines", 
+              "model.name" = "ElasticNet", 
               "model" = model,
               "prediction" = prediction))
 }
 ```
 
 ```{r load_model7}
-elastic_net(dat_1000_1)$C
+temp_summary <- iteration_model(learning_model = elastic_net,
+                                train_data_list = sample_data_list)
+temp_table <- temp_summary$table
+temp_table[, cols] <- temp_summary$table[, lapply(.SD, as.numeric), .SDcols=cols]
+datatable(temp_table[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+prediction_model7 <- temp_summary$prediction
+
+score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
 ### Model 8 :  Support Vector Machines
@@ -344,7 +441,14 @@ support_vector_machine <- function(train_data,
 ```
 
 ```{r load_model8}
-support_vector_machine(dat_1000_1)$C
+temp_summary <- iteration_model(learning_model = support_vector_machine,
+                                train_data_list = sample_data_list)
+temp_table <- temp_summary$table
+temp_table[, cols] <- temp_summary$table[, lapply(.SD, as.numeric), .SDcols=cols]
+datatable(temp_table[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+prediction_model8 <- temp_summary$prediction
+
+score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
 ### Model 9:  Neural Network
@@ -371,30 +475,87 @@ neural_network <- function(train_data,
   C <-  mean(prediction != test_data[,1]) 
   
   return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Support Vector Machines", 
+              "model.name" = "Neural Network Model", 
               "model" = model,
               "prediction" = prediction))
 }
 ```
 
 ```{r load_model9}
-neural_network(dat_500_1)$C
+temp_summary <- iteration_model(learning_model = neural_network,
+                                train_data_list = sample_data_list)
+temp_table <- temp_summary$table
+temp_table[, cols] <- temp_summary$table[, lapply(.SD, as.numeric), .SDcols=cols]
+datatable(temp_table[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+prediction_model9 <- temp_summary$prediction
+
+score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
 ### Model 10
 
 
 ```{r code_model10_development, eval = TRUE}
+ensemble_model <- function(train_data_name,
+                           prediction_list,
+                           sample_size,
+                           target = test.data[,1]) {
+  t1 <- Sys.time()
+  
+  temp_prediction <- c()
+  for (j in prediction_list) {
+    temp_prediction<- cbind(temp_prediction, unlist(j[train_data_name]))
+  }
+  ensemble_prediction <- apply(temp_prediction, FUN = get.mode, MARGIN = 1 )
+    
+  t2 <- Sys.time()
 
+  A <-  sample_size / 60000
+  B <-  min(1, as.numeric(t2 - t1) / 60)
+  C <-  mean(ensemble_prediction != target)
+
+  return(list("A" = A, "B" = B, "C" = C,
+              "model.name" = "Ensemble Model",
+              "model" = NA,
+              "prediction" = ensemble_prediction))
+}
 ```
 
-```{r load_model10}
 
+```{r load_model10}
+prediction_list <- list("1" = prediction_model5,"2" = prediction_model6,"3" = prediction_model7)
+
+temp_result <- c()
+for (sample_name in names(sample_data_list)) {
+
+    model <- ensemble_model(train_data_name = sample_name,
+                            prediction_list = prediction_list,
+                            sample_size = nrow(sample_data_list[[sample_name]]) )
+    temp_result<- rbind(temp_result,
+                        c(model$model.name,
+                          nrow(sample_data_list[[sample_name]]),
+                          sample_name,
+                          model$A, model$B, model$C,
+                          score_model(model)))
+}
+
+temp_dt_result <- data.table(temp_result)
+setnames(temp_dt_result, c("Model", "Sample Size", "Data", "A", "B", "C", "Points"))
+temp_dt_result[, cols] <- temp_dt_result[, lapply(.SD, as.numeric), .SDcols=cols]
+datatable(temp_dt_result[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+
+score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
 ## Scoreboard
 
 ```{r scoreboard}
+mean_score = aggregate(score_board[, c("A","B","C","Points")], 
+                       by = list("Model" = score_board$Model, "Sample Size" = score_board$"Sample Size" ), 
+                       FUN = mean)
+setorderv(mean_score, cols = "Points")
+dt_mean_score <- data.table(mean_score)
+datatable(mean_score[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
 
 ```
 
