@@ -1,7 +1,7 @@
 ---
-title: "Applied Data Science:  Midterm Project"
-author: ""
-date: ""
+title: "Applied Data Science:  Midterm Project: Group 13"
+author: "Yanzhi Zhang, Junzhi Sheng, Shengyang Zhang"
+date: "03/13/2019"
 output:
   prettydoc::html_pretty:
   theme: cayman
@@ -35,6 +35,15 @@ library(caret)
 
 ```
 
+
+### Function Part
+In this section, we used serval helper function that has been introduced in the lecture. 
+“round.numerics” round the numeric column in data.table into desired decimal numbers.
+“get.mode” is a function I found online, it picks the mode elements from the input vector and pick the elements with the most occurance in it. If we have tie situation, it picks the one with earlier occurrence.
+“create.formula” creates a R formula object.
+“score_model” calculates the scores from model output.
+
+
 ```{r functions}
 round.numerics <- function(x, digits = 4) {
     if (is.numeric(x)) {
@@ -56,7 +65,7 @@ create.formula <- function(outcome.name, input.names, input.patterns = NA,all.da
     variable.names.from.patterns <- all.data.names[grep(pattern = pattern,
     x = all.data.names)]  
   }
-  
+
   all.input.names <- unique(c(input.names, variable.names.from.patterns))
   all.input.names <- all.input.names[all.input.names !=outcome.name]
 
@@ -67,11 +76,11 @@ create.formula <- function(outcome.name, input.names, input.patterns = NA,all.da
 
   input.names.delineated <- sprintf("`%s`", all.input.names)
   the.formula <- sprintf("`%s` ~ %s", outcome.name, paste(input.names.delineated,collapse = " + "))
-  
+
   if (return.as == "formula") {
      return(as.formula(the.formula))
   }
-  
+
   if (return.as != "formula") {
      return(the.formula)
   }
@@ -80,38 +89,31 @@ create.formula <- function(outcome.name, input.names, input.patterns = NA,all.da
 iteration_model <- function(learning_model,
                             train_data_list,
                             test_data = test.data) {
-  
+
   prediction <- list()
   result <- c()
   for(i in names(train_data_list)) {
     model <- learning_model(train_data_list[[i]])
     result<- rbind(result,
-                   c(model$model.name, 
-                     nrow(train_data_list[[i]]), 
-                     i, 
+                   c(model$model.name,
+                     nrow(train_data_list[[i]]),
+                     i,
                      model$A, model$B, model$C,
                      score_model(model)))
     prediction[i] <- list(model$prediction)
   }
   dt_result <- data.table(result)
   setnames(dt_result, c("Model", "Sample Size", "Data", "A", "B", "C", "Points"))
-  return(list("table" = dt_result, 
+  return(list("table" = dt_result,
               "prediction" = prediction))
 }
 
 score_model <- function(x) {
   return(0.25 * x$A + 0.25 * x$B + 0.5 * x$C)
 }
-
-score_summary <- function(x) {
-  x <- x[, .(A = round(mean(A), 4), 
-             B = round(mean(B), 4),
-             C = round(mean(C), 4),
-             Points = round(mean(Points), 4)),
-         by = c("Model", "Sample Size")]
-  return(x)
-}
 ```
+
+
 
 ```{r constants}
 n.values <- c(500, 1000, 2000)
@@ -124,6 +126,10 @@ train.data <- read.csv("../Data/MNIST-fashion training set-49.csv")
 test.data <- read.csv("../Data/MNIST-fashion testing set-49.csv")
 ```
 
+### Data Cleaning
+The MNIST-fashion is a well-cleaned dataset it does not need much cleaning. We only normalized the data entries from 0-255 to 0-1, since normalizing the data helps the neural network converge. If it’s not normalized each image, some images will induce bigger errors, other less errors. Since errors will be added to the gradient with the same weight and back-propagated. Weight corrections will be overestimated for some images and underestimated on others.
+
+
 ```{r clean_data}
 #normalization
 train.data[,2:50] <- train.data[,2:50]/255
@@ -133,14 +139,18 @@ clothes.labels <- as.vector(unique(test.data$label))
 input.names <- names(test.data)[-1]
 output.name <- names(test.data)[1]
 train_formula <- create.formula(outcome.name = output.name, input.names = input.names)
-
 ```
+
+
+### Generating Sample
+I used “sample_n” function on different to sample n rows from the dataset. One thing I did on sampling is I split the data into 10 sets by their labels, so that I can evenly sample the same amount of data of each labels. I think this will increase the generality of the models. Since our required sample data size is very small, I want the models at least to have enough data to learn the each label (10 for each labels for 500 sampled data)
+
 
 ```{r generate_samples}
 sample_data <- function(n.values){
   temp_sample_data <- c()
   for(i in clothes.labels){
-    temp_sample_data <- rbind(temp_sample_data, 
+    temp_sample_data <- rbind(temp_sample_data,
                               sample_n(train.data[train.data$label==i,], n.values/10) )
   }
   return(sample_n(temp_sample_data,n.values))
@@ -157,27 +167,42 @@ for (i in n.values) {
 
 ## Introduction
 
+The project focused on an image recognition problem. We constructed a variety of machine learning models with the goal of generating predictive classifications.  
+
+We developed 10 different models including Multinomial Logistic Regression, K-Nearest Neighbors, Classification Tree, Random Forest, Ridge Regression, Lasso Regression, Elastic Net, Support Vector Machines, Neural Network and an ensemble model which took a majority voting among 3 different models. Besides, we improved some of the models with tuning parameters or some algorithms used by them.  
+
+In each model, we return 3 factors, the sample size, running time and test error rate, as a result, because these three criteria are all playing import roles in practical application. With these results, we processed a scoring function: $Points = 0.25 * A + 0.25 * B + 0.5 * C$, assigning different weights to 3 factors and then calculating points for each model.  
+
+Finally, based on the aggregated score board and model development, we conducted some analysis within model and between models.  
+
+### Multinomial logistic regression:
+
+Multinomial logistic regression model is based on when the response of Y has more than two categories. Try to best beta for each category then use the beta and test data to predict the new response. Final, we compare the test data prediction and test data class calculating the error rate. In the model x is train data, y is train data response which we should change as factor in order to as category. The family we choose as multinomial because our output category is more than 2 and is not quantitative. 
+
+Based on the result, we can see even though in the same sample size situation, the model running time is not same and test error will have obvious difference. With the sample size increasing, model running time definitely will increase and also test error rate will decrease obviously. 
+
+
 
 ### Model 1:  Multinomial logistic regression
 
 
 ```{r code_model1_development, eval = TRUE}
-multinomial_logistic_regression <- function(train_data, 
+multinomial_logistic_regression <- function(train_data,
                                             test_data = test.data) {
   t1 <- Sys.time()
   model <- multinom(formula = train_formula,
                     train_data,
                     trace=FALSE)
-  prediction <- predict(object = model, 
+  prediction <- predict(object = model,
                   newdata = test_data[,2:50])
   t2 <- Sys.time()
-  
-  A <-  nrow(train_data) / 60000 
-  B <-  min(1, as.numeric(t2 - t1) / 60) 
-  C <-  mean(prediction != test_data[,1]) 
-  
-  return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Multinomial logistic regression", 
+
+  A <-  nrow(train_data) / 60000
+  B <-  min(1, as.numeric(t2 - t1) / 60)
+  C <-  mean(prediction != test_data[,1])
+
+  return(list("A" = A, "B" = B, "C" = C,
+              "model.name" = "Multinomial logistic regression",
               "model" = model,
               "prediction" = prediction))
 }
@@ -194,11 +219,21 @@ prediction_model1 <- temp_summary$prediction
 score_board <- temp_table[,-"Data"]
 ```
 
+### KNN:  
+5-NN is the best choice among all k-NN models. The greater k is, the less distinct boundary between classes will be, in other words, boundary will become more zigzag. For the low resolution of original datasets (7*7 pixels), boundary between classes will not be clear. As a result of this feature, a small k is a theoretical optimal choice, and so is it in practical trials.  
+  
+The key part for time consuming in KNN model is its nearest neighbor search algorithm. There are 3 choices in knn function, which are "kd_tree", "cover_tree" and "brute". Brute force algorithm is the most simplest one. It calculates the distance between one data point and all other points, with a complexity of $O(N^2)$.  
+  
+"kd_tree" is a multinomial binary search tree algorithm. It will hold a complexity of $O(N\log N)$. "cover_tree" is the same as "kd_tree".  
+  
+So, in terms of the time-consuming, with our trials among these three different nearest neighbor search algorithm, we finally determined to choose "kd_tree" as our NNS algorithm. And in the result, KD tree algorithm spent much less than brute force algorithm.  
+
+
 ### Model 2:  K-Nearest Neighbors
 
 
 ```{r code_model2_development, eval = TRUE}
-k_nearest_neighbors <- function(train_data, 
+k_nearest_neighbors <- function(train_data,
                                 test_data = test.data,
                                 K = 5) {
   t1 <- Sys.time()
@@ -207,13 +242,13 @@ k_nearest_neighbors <- function(train_data,
                     cl = train_data[,1],
                     k = K)
   t2 <- Sys.time()
-  
-  A <-  nrow(train_data) / 60000 
-  B <-  min(1, as.numeric(t2 - t1) / 60) 
-  C <-  mean(prediction != test_data[,1]) 
-  
-  return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "5-Nearest Neighbors", 
+
+  A <-  nrow(train_data) / 60000
+  B <-  min(1, as.numeric(t2 - t1) / 60)
+  C <-  mean(prediction != test_data[,1])
+
+  return(list("A" = A, "B" = B, "C" = C,
+              "model.name" = "5-Nearest Neighbors",
               "model" = NA,
               "prediction" = prediction))
 }
@@ -230,11 +265,16 @@ prediction_model2 <- temp_summary$prediction
 score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
+### Classification Tree
+The classification tree is a nonparametric method decision trees for modeling. It was convenient and could deal with categorical variables directly. A decision tree was a flowchart-like structure in which each internal node represents a "test" on an attribute. The paths from the root to leaf represented classification rules. 
+
+One of the disadvantage that we have in our classification tree model is that it can have low bias but very high variance. One small change in observed data might completely change the tree. Therefore, it is hard to generalize a single tree for other circumstances. In our model, the classification tree does not have a good accuracy on test set, no matter how we tune the parameters. The advantage of classification tree model is it is easy to implement and very intuitive, and it require little data preparation. The down side is very obvious. The tree can be very non-robust, it can optimize one kind of data which makes it perform well on few situations, but it won’t generalize very well on large and complex dataset.
+
 ### Model 3:  Classification Tree
 
 
 ```{r code_model3_development, eval = TRUE}
-classification_tree <- function(train_data, 
+classification_tree <- function(train_data,
                                 test_data = test.data) {
   t1 <- Sys.time()
   model <- rpart(formula = train_formula,
@@ -244,13 +284,13 @@ classification_tree <- function(train_data,
                         newdata = test.data[,-1],
                         type = "class")
   t2 <- Sys.time()
-  
-  A <-  nrow(train_data) / 60000 
-  B <-  min(1, as.numeric(t2 - t1) / 60) 
-  C <-  mean(prediction != test_data[,1]) 
-  
-  return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Classification Tree", 
+
+  A <-  nrow(train_data) / 60000
+  B <-  min(1, as.numeric(t2 - t1) / 60)
+  C <-  mean(prediction != test_data[,1])
+
+  return(list("A" = A, "B" = B, "C" = C,
+              "model.name" = "Classification Tree",
               "model" = model,
               "prediction" = prediction))
 }
@@ -267,25 +307,31 @@ prediction_model3 <- temp_summary$prediction
 score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
+### Random Forest  
+Actually, Random Forest model is an ensembling model. It runs a general technique of bootstrap aggregating, or bagging in its training process and takes the majority vote. So, we predicted that random forest will be scored better than most of other models.  
+  
+Considering different sample sizes, run time of 5-NN model did not increase a lot, while run time of random forest model and SVM is proportional to the sample size. But the scoring method does not give the most weight to run time, so 5-NN model still loses in the score competition.
+
+
 ### Model 4:  Random Forest
 
 
 ```{r code_model4_development, eval = TRUE}
-random_forest <- function(train_data, 
+random_forest <- function(train_data,
                           test_data = test.data) {
   t1 <- Sys.time()
-  model <- randomForest(x = train_data[,-1], 
+  model <- randomForest(x = train_data[,-1],
                         y = train_data[,1])
   prediction <- predict(object = model,
                         newdata = test.data[,-1])
   t2 <- Sys.time()
-  
-  A <-  nrow(train_data) / 60000 
-  B <-  min(1, as.numeric(t2 - t1) / 60) 
-  C <-  mean(prediction != test_data[,1]) 
-  
-  return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Random Forest", 
+
+  A <-  nrow(train_data) / 60000
+  B <-  min(1, as.numeric(t2 - t1) / 60)
+  C <-  mean(prediction != test_data[,1])
+
+  return(list("A" = A, "B" = B, "C" = C,
+              "model.name" = "Random Forest",
               "model" = model,
               "prediction" = prediction))
 }
@@ -302,28 +348,34 @@ prediction_model4 <- temp_summary$prediction
 score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
+### Ridge
+
+Ridge regression is basic same as linear regression. The difference is ridge regression has L2 penalty in cost function. The lambda choose is based on how serious multicollinearity. In the model, x is train data, y is train data response as factor because our output is not quantitative. Alpha is zero for ridge regression and family we choose as multinomial because our output category is more than 2 and is not quantitative.
+
+Based on the result, with the sample size increasing, the running time is increasing too but not too much and the test error rate is also decreasing. The test error rate not change a lot and even for 500 small sample size, the test error rate is pretty lower.
+
 ### Model 5:  Ridge Regression alpha = 0
 
 
 ```{r code_model5_development, eval = TRUE}
-ridge_regression <- function(train_data, 
+ridge_regression <- function(train_data,
                                    test_data = test.data) {
   t1 <- Sys.time()
   model <- glmnet(x = as.matrix(train_data[,-1]),
-                  y = as.matrix(train_data[,1]), 
-                  alpha = 0, 
+                  y = as.matrix(train_data[,1]),
+                  alpha = 0,
                   family = "multinomial")
   prediction <- predict(object = model,
                         newx = as.matrix(test.data[,-1]),
                         type = "class")
   t2 <- Sys.time()
-  
-  A <-  nrow(train_data) / 60000 
-  B <-  min(1, as.numeric(t2 - t1) / 60) 
-  C <-  mean(prediction != test_data[,1]) 
-  
-  return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Ridge Regression", 
+
+  A <-  nrow(train_data) / 60000
+  B <-  min(1, as.numeric(t2 - t1) / 60)
+  C <-  mean(prediction != test_data[,1])
+
+  return(list("A" = A, "B" = B, "C" = C,
+              "model.name" = "Ridge Regression",
               "model" = model,
               "prediction" = prediction))
 }
@@ -340,28 +392,34 @@ prediction_model5 <- temp_summary$prediction
 score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
+### Lasso
+
+Lasso regression is basic same as linear regression. The difference is lasso regression has L1 penalty in cost function. The lambda choose is based on how serious multicollinearity. In the model, x is train data, y is train data response as factor because our output is not quantitative. Alpha is one for lasso regression and family we choose as multinomial because our output category is more than 2 and is not quantitative.
+
+Based on the result, with the sample size increasing, the running time is increasing too and the test error rate is also decreasing. The test error rate decrease really obvious, and best test error rate is really low than other model.  
+
 ### Model 6:  Lasso Regression alpha = 1
 
 
 ```{r code_model6_development, eval = TRUE}
-lasso_regression <- function(train_data, 
+lasso_regression <- function(train_data,
                                    test_data = test.data) {
   t1 <- Sys.time()
   model <- glmnet(x = as.matrix(train_data[,-1]),
-                  y = as.matrix(train_data[,1]), 
-                  alpha = 1, 
+                  y = as.matrix(train_data[,1]),
+                  alpha = 1,
                   family = "multinomial")
   prediction <- predict(object = model,
                         newx = as.matrix(test.data[,-1]),
                         type = "class")
   t2 <- Sys.time()
-  
-  A <-  nrow(train_data) / 60000 
-  B <-  min(1, as.numeric(t2 - t1) / 60) 
-  C <-  mean(prediction != test_data[,1]) 
-  
-  return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Lasso Regression", 
+
+  A <-  nrow(train_data) / 60000
+  B <-  min(1, as.numeric(t2 - t1) / 60)
+  C <-  mean(prediction != test_data[,1])
+
+  return(list("A" = A, "B" = B, "C" = C,
+              "model.name" = "Lasso Regression",
               "model" = model,
               "prediction" = prediction))
 }
@@ -378,6 +436,13 @@ prediction_model6 <- temp_summary$prediction
 score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
+### Elastic net:
+
+Elastic net regression is basic same as linear regression. The difference is elastic net regularized regression has both L1 and L2 penalty in cost function. The lambda choose is based on how serious multicollinearity. In the model, x is train data, y is train data response as factor because our output is not quantitative. Alpha in here we choose 0.5 and family we choose as multinomial because our output category is more than 2 and is not quantitative.
+
+Based on the result, with the sample size increasing, the running time has no big difference and running time is really slow than Multinomial logistic regression. Also with the sample size increasing, the test error rate has slightly decreasing. However, the test error rate don’t improve lot and best test error rate is also higher than best test error rate of Multinomial logistic regression.    
+
+
 ### Model 7 : ElasticNet alpha = 0.5
 
 
@@ -386,20 +451,20 @@ elastic_net <- function(train_data,
                         test_data = test.data) {
   t1 <- Sys.time()
   model <- glmnet(x = as.matrix(train_data[,-1]),
-                  y = as.matrix(train_data[,1]), 
-                  alpha = 1, 
+                  y = as.matrix(train_data[,1]),
+                  alpha = 0.5,
                   family = "multinomial")
   prediction <- predict(object = model,
                         newx = as.matrix(test.data[,-1]),
                         type = "class")
   t2 <- Sys.time()
-  
-  A <-  nrow(train_data) / 60000 
-  B <-  min(1, as.numeric(t2 - t1) / 60) 
-  C <-  mean(prediction != test_data[,1]) 
-  
-  return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "ElasticNet", 
+
+  A <-  nrow(train_data) / 60000
+  B <-  min(1, as.numeric(t2 - t1) / 60)
+  C <-  mean(prediction != test_data[,1])
+
+  return(list("A" = A, "B" = B, "C" = C,
+              "model.name" = "ElasticNet",
               "model" = model,
               "prediction" = prediction))
 }
@@ -416,11 +481,19 @@ prediction_model7 <- temp_summary$prediction
 score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
+### SVM:  
+Kernel functions are used to map original datasets into higher dimensional with view to make them linear datasets.  
+  
+RBF(Radial Basis Function) is a general-proposed kernel, and is used when there is no prior knowledge of data. While linear and polynomial kernel function are less time-consuming, they provide less accuracy. In trials of different kernel functions, RBF did the best work.  
+  
+Cost is how much we penalize the svm for data points on the wrong side of the dividing hyperplane, which could mean an overly complex model with a small margin if the points aren't easily separable. In our dataset, resolution of pixels are reduced to 7*7. It is not a good quality, and may blur the difference between classes. As cost set to 20, approximately, we got the lowest test error rates, which demonstrates the meaning of cost in SVM model.  
+
+
 ### Model 8 :  Support Vector Machines
 
 
 ```{r code_model8_development, eval = TRUE}
-support_vector_machine <- function(train_data, 
+support_vector_machine <- function(train_data,
                                    test_data = test.data) {
   t1 <- Sys.time()
   model <- svm(train_data[,2:50],
@@ -428,13 +501,13 @@ support_vector_machine <- function(train_data,
   prediction <- predict(object = model,
                         newdata = test.data[,-1])
   t2 <- Sys.time()
-  
-  A <-  nrow(train_data) / 60000 
-  B <-  min(1, as.numeric(t2 - t1) / 60) 
-  C <-  mean(prediction != test_data[,1]) 
-  
-  return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Support Vector Machines", 
+
+  A <-  nrow(train_data) / 60000
+  B <-  min(1, as.numeric(t2 - t1) / 60)
+  C <-  mean(prediction != test_data[,1])
+
+  return(list("A" = A, "B" = B, "C" = C,
+              "model.name" = "Support Vector Machines",
               "model" = model,
               "prediction" = prediction))
 }
@@ -451,6 +524,15 @@ prediction_model8 <- temp_summary$prediction
 score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
+### Neural Networks
+
+Neural networks (ANN) or connectionist systems are computing systems inspired by the biological neural networks that constitute animal brains.[1] The neural network itself is not an algorithm, but rather a framework for many different machine learning algorithms to work together and process complex data inputs. 
+
+We chose this model is mainly because neural nets is trendy in nowadays machine learning industries and it has achieved great results on the traditional MNIST data set and it has great performance on all kinds of image analysis problem.
+
+However, the neural nets perform really badly on my data set. It not only takes a long time to fit the model to its desired stopping threshold but also has a very relatively low accuracy on test set. I have tuned the parameters with different “decay” which should increase its rate of convergence and “maxit” which prevents the model from overfitting and stop it early when it gets stuck in the saddle point. None of this parameter helps to increase the performance of the model. The advantages of this neural network will be its expressive power if we carefully design its structures and tuning its hyperparameters, but the downside is that it is hard to train and takes a lot of computation power.
+
+
 ### Model 9:  Neural Network
 
 
@@ -459,23 +541,23 @@ neural_network <- function(train_data,
                            test_data = test.data) {
   t1 <- Sys.time()
   model <- nnet(label ~ .,
-                data = train_data, 
+                data = train_data,
                 size = 2,
                 rang = 0.1,
-                decay = 5e-4, 
+                decay = 5e-4,
                 maxit = 200,
                 trace =F)
   prediction <- predict(object = model,
                         newdata = test.data[,-1],
                         type = "class")
   t2 <- Sys.time()
-  
-  A <-  nrow(train_data) / 60000 
-  B <-  min(1, as.numeric(t2 - t1) / 60) 
-  C <-  mean(prediction != test_data[,1]) 
-  
-  return(list("A" = A, "B" = B, "C" = C, 
-              "model.name" = "Neural Network Model", 
+
+  A <-  nrow(train_data) / 60000
+  B <-  min(1, as.numeric(t2 - t1) / 60)
+  C <-  mean(prediction != test_data[,1])
+
+  return(list("A" = A, "B" = B, "C" = C,
+              "model.name" = "Neural Network Model",
               "model" = model,
               "prediction" = prediction))
 }
@@ -492,6 +574,15 @@ prediction_model9 <- temp_summary$prediction
 score_board <- rbind(score_board, temp_table[,-"Data"])
 ```
 
+### Ensembling
+
+Ensemble methods use multiple learning algorithms to obtain better predictive performance than could be obtained from any of the constituent learning algorithms alone.[1][2][3] Unlike a statistical ensemble in statistical mechanics, which is usually infinite, a machine learning ensemble consists of only a concrete finite set of alternative models, but typically allows for much more flexible structure to exist among those alternatives.
+
+We chose the three generalized linear regression models which are lasso, ridge and Elastic-Net. By combining those thee models, we hope it can combine the power of pure l1, pure l2 and mixed loss to have a better performance on the test set. The technique that we used on our ensembling model is pick the mode of other prediction.
+
+However, ensemble method does not meet our expectation, and it does not improve the prediction accuracy by a lot. One of reason is that we did not pick the ensembled prediction very carefully. I think picking lasso, ridge and Elastic-Net is redundant which jeopardize the overall prediction accuracy. If we choose the models that we want to put in our ensemble method more carefully, we might get a better results. The other reason can be that since the training data set is so small compared to the testing data, our model might already overfit the training data. Hence, a bad accuracy on test set can be expected. The advantage of ensemble method is it can achieve great result with very simple technique, and it can combine the expressive power from different models together. In theory, this should always give us a good result. The down side of that is obvious, it can overfit the training set very easily.
+
+
 ### Model 10
 
 
@@ -501,13 +592,13 @@ ensemble_model <- function(train_data_name,
                            sample_size,
                            target = test.data[,1]) {
   t1 <- Sys.time()
-  
+
   temp_prediction <- c()
   for (j in prediction_list) {
     temp_prediction<- cbind(temp_prediction, unlist(j[train_data_name]))
   }
   ensemble_prediction <- apply(temp_prediction, FUN = get.mode, MARGIN = 1 )
-    
+
   t2 <- Sys.time()
 
   A <-  sample_size / 60000
@@ -550,18 +641,34 @@ score_board <- rbind(score_board, temp_table[,-"Data"])
 ## Scoreboard
 
 ```{r scoreboard}
-mean_score = aggregate(score_board[, c("A","B","C","Points")], 
-                       by = list("Model" = score_board$Model, "Sample Size" = score_board$"Sample Size" ), 
+mean_score = aggregate(score_board[, c("A","B","C","Points")],
+                       by = list("Model" = score_board$Model, "Sample Size" = score_board$"Sample Size" ),
                        FUN = mean)
 setorderv(mean_score, cols = "Points")
 dt_mean_score <- data.table(mean_score)
-datatable(mean_score[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
+datatable(dt_mean_score[, lapply(X = .SD, FUN = "round.numerics", digits = 4)])
 
 ```
 
 ## Discussion
 
+Our model has some very good accuracy from SVM and random forest. The SVM also has the lowest running time among all the models. I think the point function takes all three aspects into consideration which is sample size, running time and accuracy. If we change the point function, we can focus more on different aspect of model. For example, if we gave more weight to the sample size component A or the running time factor B instead of more weight to the accuracy C, then the point function will give lower(better) scores to those model with less training sample and less running time. 
+
+If we have enough computing resources, I will definitely train the model on a dataset that is at least larger than the testing set. I can also do grid search on the hyperparameter to get the best accuracy on testing set. Also the 7\*7 images are too vague, models might not learn the pattern properly. Training our models on the original 28\*28 will definitely improve the accuracy.
+
+We are not worried about fitting too many models. Exploring models can let us explore which models perform well on our dataset and which models have a lower running time. We can pick the best models for our ensembling methods.
+
+
 
 ## References
 
+https://www.wikiwand.com/en/Decision_tree_learning#/Variance_reduction
+http://cognitivemedium.com/rmnist
+http://varianceexplained.org/r/digit-eda/
+https://martin-thoma.com/comparing-classifiers/
+https://arxiv.org/pdf/1708.07747.pdf
+https://towardsdatascience.com/fashion-mnist-with-deep-learning-studio-a-nonconformist-approach-towards-deep-learning-52dbe3c0f703
+https://stackoverflow.com/questions/2547402/is-there-a-built-in-function-for-finding-the-mode
+https://www.wikiwand.com/en/Artificial_neural_network#/overview
+https://www.wikiwand.com/en/Ensemble_learning
 
